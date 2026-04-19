@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GeoDraft</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand-block">
+          <p class="eyebrow">Graphics Utility Prototype</p>
+          <h1>GeoDraft</h1>
+          <p class="subtitle">
+            A local-first image annotation and geometric measurement workspace.
+          </p>
+        </div>
+
+        <section class="panel">
+          <label class="field-label" for="project-name">Project name</label>
+          <input id="project-name" type="text" value="GeoDraft Prototype" />
+
+          <label class="field-label" for="image-loader">Load image</label>
+          <div class="file-picker">
+            <input id="image-loader" class="file-input" type="file" accept="image/*" />
+            <label for="image-loader" class="file-trigger">Select Image</label>
+            <div class="file-meta">
+              <strong id="file-name">No image selected</strong>
+              <span>Supported: PNG, JPG, JPEG, WebP, BMP</span>
+            </div>
+          </div>
+
+          <div class="tool-row">
+            <span class="field-label">Tool</span>
+            <div class="tool-group">
+              <button data-tool="rectangle" class="tool-button active" type="button">Rectangle</button>
+              <button data-tool="line" class="tool-button" type="button">Line</button>
+              <button data-tool="polygon" class="tool-button" type="button">Polygon</button>
+            </div>
+            <p class="tool-help">
+              Rectangle: drag to measure. Line: drag between two points. Polygon: click to add vertices, double-click to finish.
+            </p>
+          </div>
+
+          <div class="actions">
+            <button id="clear-button" class="ghost" type="button">Clear annotations</button>
+            <button id="save-button" class="primary" type="button">Save to backend</button>
+          </div>
+
+          <p id="status-line" class="status-line">
+            Load an image and drag on the canvas to create a measurement box.
+          </p>
+        </section>
+
+        <section class="panel metrics">
+          <div class="metric-card">
+            <span class="metric-label">Annotations</span>
+            <strong id="annotation-count">0</strong>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">Selection</span>
+            <strong id="selection-size">None</strong>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">Image</span>
+            <strong id="image-size">No file</strong>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-heading">
+            <h2>Annotation List</h2>
+            <span id="annotation-hint">Newest first</span>
+          </div>
+          <ul id="annotation-list" class="annotation-list">
+            <li class="empty-state">No annotations yet.</li>
+          </ul>
+        </section>
+      </aside>
+
+      <main class="workspace">
+        <div class="workspace-header">
+          <div>
+            <p class="eyebrow">Canvas Workspace</p>
+            <h2>Image Overlay</h2>
+          </div>
+          <p class="workspace-note">
+            Prototype scope: image import, rectangle and line measurement, polygon area markup, local save API.
+          </p>
+        </div>
+
+        <section class="canvas-panel">
+          <canvas id="draft-canvas" aria-label="GeoDraft canvas"></canvas>
+          <div id="canvas-overlay" class="canvas-overlay">
+            <strong>Canvas ready.</strong>
+            <span>Load a local image to start measuring.</span>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/app.js') }}" defer></script>
+  </body>
+</html>
