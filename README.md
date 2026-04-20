@@ -58,6 +58,35 @@ For Windows double-click or `cmd` startup:
 start.bat
 ```
 
+## Multi-Account Upload Automation
+
+This repository now also includes a separate browser automation scaffold for switching between multiple accounts and uploading the same file.
+
+1. Install the optional automation dependency:
+
+```powershell
+pip install -r requirements-automation.txt
+python -m playwright install chromium
+```
+
+2. Copy the example config files and fill in your target site details:
+
+```powershell
+New-Item -ItemType Directory -Force D:\work\account
+Copy-Item automation\accounts.example.json D:\work\account\accounts.local.json
+Copy-Item automation\site.example.json D:\work\account\site.local.json
+```
+
+3. Keep credentials in the local file or use environment variables referenced by `password_env`.
+
+4. Run the uploader for one account or all accounts:
+
+```powershell
+.\start-upload.ps1 -File D:\path\to\asset.png -Account all
+```
+
+The automation reads account and site config from `D:\work\account\`, stores one browser profile per account in `automation/.auth/`, and writes each run result to `automation/run-log.jsonl`.
+
 ## Next Useful Milestones
 
 1. Add polygon and line measurement tools.

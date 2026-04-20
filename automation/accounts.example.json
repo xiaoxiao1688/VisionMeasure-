@@ -1,0 +1,14 @@
+{
+  "accounts": [
+    {
+      "alias": "account-a",
+      "email": "first@example.com",
+      "password_env": "UPLOAD_ACCOUNT_A_PASSWORD"
+    },
+    {
+      "alias": "account-b",
+      "email": "second@example.com",
+      "password_env": "UPLOAD_ACCOUNT_B_PASSWORD"
+    }
+  ]
+}

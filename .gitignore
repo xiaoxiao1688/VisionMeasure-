@@ -3,3 +3,6 @@ __pycache__/
 *.pyc
 data/*.json
 !data/.gitkeep
+automation/.auth/
+automation/run-log.jsonl
+gcm-diagnose.log
