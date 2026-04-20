@@ -1,16 +1,22 @@
 const elements = {
+  addTagButton: document.querySelector("#add-tag-button"),
   annotationCount: document.querySelector("#annotation-count"),
   annotationList: document.querySelector("#annotation-list"),
   canvas: document.querySelector("#draft-canvas"),
   clearButton: document.querySelector("#clear-button"),
   fileName: document.querySelector("#file-name"),
+  historyList: document.querySelector("#history-list"),
   imageLoader: document.querySelector("#image-loader"),
   imageSize: document.querySelector("#image-size"),
   overlay: document.querySelector("#canvas-overlay"),
   projectName: document.querySelector("#project-name"),
+  refreshHistory: document.querySelector("#refresh-history"),
   saveButton: document.querySelector("#save-button"),
   selectionSize: document.querySelector("#selection-size"),
   statusLine: document.querySelector("#status-line"),
+  tagEditor: document.querySelector("#tag-editor"),
+  tagInput: document.querySelector("#tag-input"),
+  tagList: document.querySelector("#tag-list"),
   toolButtons: [...document.querySelectorAll("[data-tool]")],
 };
 
@@ -25,6 +31,7 @@ const state = {
   pointerStart: null,
   polygonPoints: [],
   selectedId: null,
+  sessions: [],
 };
 
 const ctx = elements.canvas.getContext("2d");
@@ -307,6 +314,7 @@ function normalizeRectangle(start, end) {
     width,
     height,
     area: width * height,
+    tags: [],
   };
 }
 
@@ -320,6 +328,7 @@ function createLineAnnotation(start, end) {
     start,
     end,
     length: Math.hypot(deltaX, deltaY),
+    tags: [],
   };
 }
 
@@ -330,6 +339,7 @@ function createPolygonAnnotation(points) {
     points,
     area: getPolygonArea(points),
     perimeter: getPolygonPerimeter(points),
+    tags: [],
   };
 }
 
@@ -424,6 +434,22 @@ function setCurrentTool(tool) {
   drawScene();
 }
 
+function formatDate(isoString) {
+  if (!isoString) return "";
+  try {
+    const date = new Date(isoString);
+    return date.toLocaleString("zh-CN", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return isoString;
+  }
+}
+
 function renderAnnotationList() {
   elements.annotationCount.textContent = String(state.annotations.length);
 
@@ -438,10 +464,17 @@ function renderAnnotationList() {
     .map((annotation) => {
       const activeClass = annotation.id === state.selectedId ? "annotation-item active" : "annotation-item";
       const summary = getAnnotationSummary(annotation);
+      const tagsHtml =
+        annotation.tags && annotation.tags.length
+          ? `<div class="annotation-tags">${annotation.tags
+              .map((tag) => `<span class="annotation-tag">${escapeHtml(tag)}</span>`)
+              .join("")}</div>`
+          : "";
       return `
         <li class="${activeClass}" data-id="${annotation.id}">
           <p class="annotation-title">${summary.title}</p>
           <p class="annotation-meta">${summary.meta}</p>
+          ${tagsHtml}
         </li>
       `;
     })
@@ -453,10 +486,54 @@ function renderAnnotationList() {
   elements.selectionSize.textContent = selected ? getAnnotationSummary(selected).selection : "None";
 }
 
+function escapeHtml(text) {
+  const div = document.createElement("div");
+  div.textContent = text;
+  return div.innerHTML;
+}
+
 function selectAnnotation(id) {
   state.selectedId = id;
   renderAnnotationList();
   drawScene();
+  updateTagEditor();
+}
+
+function updateTagEditor() {
+  if (!state.selectedId) {
+    elements.tagEditor.classList.add("hidden");
+    return;
+  }
+
+  const annotation = state.annotations.find((a) => a.id === state.selectedId);
+  if (!annotation) {
+    elements.tagEditor.classList.add("hidden");
+    return;
+  }
+
+  elements.tagEditor.classList.remove("hidden");
+
+  if (!annotation.tags) {
+    annotation.tags = [];
+  }
+
+  if (annotation.tags.length === 0) {
+    elements.tagList.innerHTML = "";
+    return;
+  }
+
+  const tagsHtml = annotation.tags
+    .map(
+      (tag) => `
+    <span class="tag-item" data-tag="${escapeHtml(tag)}">
+      ${escapeHtml(tag)}
+      <button class="tag-remove" type="button" data-tag="${escapeHtml(tag)}">×</button>
+    </span>
+  `
+    )
+    .join("");
+
+  elements.tagList.innerHTML = tagsHtml;
 }
 
 function loadImage(file) {
@@ -509,6 +586,7 @@ async function saveAnnotations() {
     annotations: state.annotations.map((annotation) => ({
       id: annotation.id,
       type: annotation.type,
+      tags: annotation.tags || [],
       x: annotation.x !== undefined ? Number(annotation.x.toFixed(2)) : undefined,
       y: annotation.y !== undefined ? Number(annotation.y.toFixed(2)) : undefined,
       width: annotation.width !== undefined ? Number(annotation.width.toFixed(2)) : undefined,
@@ -552,8 +630,140 @@ async function saveAnnotations() {
     }
 
     setStatus(`Saved ${state.annotations.length} annotation(s) to ${body.file}.`);
+    await loadHistoryList();
   } catch (error) {
     setStatus(error.message || "Save failed.", "error");
+  }
+}
+
+function addTagToSelected() {
+  if (!state.selectedId) return;
+
+  const tagValue = elements.tagInput.value.trim();
+  if (!tagValue) {
+    setStatus("Please enter a tag name.", "error");
+    return;
+  }
+
+  const annotation = state.annotations.find((a) => a.id === state.selectedId);
+  if (!annotation) return;
+
+  if (!annotation.tags) {
+    annotation.tags = [];
+  }
+
+  if (annotation.tags.includes(tagValue)) {
+    setStatus("This tag already exists.", "error");
+    return;
+  }
+
+  annotation.tags.push(tagValue);
+  elements.tagInput.value = "";
+  renderAnnotationList();
+  updateTagEditor();
+  setStatus(`Added tag "${tagValue}".`);
+}
+
+function removeTagFromSelected(tag) {
+  if (!state.selectedId) return;
+
+  const annotation = state.annotations.find((a) => a.id === state.selectedId);
+  if (!annotation || !annotation.tags) return;
+
+  const index = annotation.tags.indexOf(tag);
+  if (index === -1) return;
+
+  annotation.tags.splice(index, 1);
+  renderAnnotationList();
+  updateTagEditor();
+  setStatus(`Removed tag "${tag}".`);
+}
+
+async function loadHistoryList() {
+  try {
+    const response = await fetch("/api/sessions", {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+
+    const body = await response.json();
+    if (!response.ok) {
+      throw new Error(body.error || "Failed to load history.");
+    }
+
+    state.sessions = body.sessions || [];
+    renderHistoryList();
+  } catch (error) {
+    setStatus(error.message || "Failed to load history.", "error");
+  }
+}
+
+function renderHistoryList() {
+  if (!state.sessions.length) {
+    elements.historyList.innerHTML = '<li class="empty-state">No saved sessions yet.</li>';
+    return;
+  }
+
+  const items = state.sessions
+    .map((session) => {
+      const dateStr = formatDate(session.savedAt);
+      return `
+        <li class="history-item" data-filename="${escapeHtml(session.filename)}">
+          <p class="history-item-title">${escapeHtml(session.projectName)}</p>
+          <p class="history-item-meta">
+            <span>${dateStr}</span>
+            <span>${session.annotationCount} annotation(s)</span>
+          </p>
+        </li>
+      `;
+    })
+    .join("");
+
+  elements.historyList.innerHTML = items;
+}
+
+async function loadSession(filename) {
+  try {
+    const response = await fetch(`/api/sessions/${encodeURIComponent(filename)}`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+
+    const body = await response.json();
+    if (!response.ok) {
+      throw new Error(body.error || "Failed to load session.");
+    }
+
+    const projectName = body.projectName || "GeoDraft";
+    const annotations = body.annotations || [];
+    const imageMeta = body.imageMeta || {};
+
+    elements.projectName.value = projectName;
+
+    annotations.forEach((annotation) => {
+      if (!annotation.tags) {
+        annotation.tags = [];
+      }
+    });
+
+    state.annotations = annotations;
+    state.selectedId = null;
+
+    renderAnnotationList();
+    drawScene();
+    updateTagEditor();
+
+    if (imageMeta.name) {
+      setStatus(`Loaded session: ${projectName} (${annotations.length} annotations). Image: ${imageMeta.name} - please reload the image file if needed.`);
+    } else {
+      setStatus(`Loaded session: ${projectName} (${annotations.length} annotations).`);
+    }
+  } catch (error) {
+    setStatus(error.message || "Failed to load session.", "error");
   }
 }
 
@@ -756,9 +966,43 @@ elements.saveButton.addEventListener("click", () => {
   saveAnnotations();
 });
 
+elements.refreshHistory.addEventListener("click", () => {
+  loadHistoryList();
+  setStatus("Refreshed history list.");
+});
+
+elements.addTagButton.addEventListener("click", () => {
+  addTagToSelected();
+});
+
+elements.tagInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    addTagToSelected();
+  }
+});
+
+elements.tagList.addEventListener("click", (event) => {
+  const removeButton = event.target.closest(".tag-remove");
+  if (removeButton) {
+    const tag = removeButton.dataset.tag;
+    if (tag) {
+      removeTagFromSelected(tag);
+    }
+  }
+});
+
+elements.historyList.addEventListener("click", (event) => {
+  const historyItem = event.target.closest(".history-item");
+  if (historyItem && historyItem.dataset.filename) {
+    loadSession(historyItem.dataset.filename);
+  }
+});
+
 window.addEventListener("resize", syncCanvasSize);
 
 renderAnnotationList();
 updateToolButtons();
 refreshOverlay();
 syncCanvasSize();
+loadHistoryList();

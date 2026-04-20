@@ -70,12 +70,35 @@
 
         <section class="panel">
           <div class="panel-heading">
+            <h2>History</h2>
+            <button id="refresh-history" class="refresh-button" type="button" title="Refresh history">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M1 4v6h6M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>
+              </svg>
+            </button>
+          </div>
+          <ul id="history-list" class="history-list">
+            <li class="empty-state">No saved sessions yet.</li>
+          </ul>
+        </section>
+
+        <section class="panel">
+          <div class="panel-heading">
             <h2>Annotation List</h2>
             <span id="annotation-hint">Newest first</span>
           </div>
           <ul id="annotation-list" class="annotation-list">
             <li class="empty-state">No annotations yet.</li>
           </ul>
+
+          <div id="tag-editor" class="tag-editor hidden">
+            <label class="field-label" for="tag-input">Tags</label>
+            <div class="tag-input-row">
+              <input id="tag-input" type="text" placeholder="Type a tag and press Enter" />
+              <button id="add-tag-button" class="add-tag-button" type="button">Add</button>
+            </div>
+            <div id="tag-list" class="tag-list"></div>
+          </div>
         </section>
       </aside>
 
