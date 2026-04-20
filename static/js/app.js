@@ -48,14 +48,14 @@ function setStatus(message, tone = "default") {
 
 function getToolInstructions(tool = state.currentTool) {
   if (tool === "line") {
-    return "线条工具已激活。在两点之间拖动以记录距离。";
+    return "线段工具已启用，在两个点之间拖动即可记录距离。";
   }
 
   if (tool === "polygon") {
-    return "多边形工具已激活。点击添加顶点，然后双击闭合并测量面积。";
+    return "多边形工具已启用，点击添加顶点，双击或按 Enter 完成闭合。";
   }
 
-  return "矩形工具已激活。在图片上任意位置拖动以创建测量框。";
+  return "矩形工具已启用，在图片上拖动即可创建测量框。";
 }
 
 function syncCanvasSize() {
@@ -81,7 +81,6 @@ function computeImagePlacement() {
   const padding = 36;
   const availableWidth = elements.canvas.width - padding * 2;
   const availableHeight = elements.canvas.height - padding * 2;
-
   const scale = Math.min(
     availableWidth / state.image.width,
     availableHeight / state.image.height,
@@ -131,10 +130,10 @@ function drawEmptyCanvas() {
   ctx.save();
   ctx.fillStyle = "rgba(255, 255, 255, 0.12)";
   ctx.font = '600 20px "Aptos", "Segoe UI Variable Text", sans-serif';
-  ctx.fillText("加载图片开始标注。", 32, 42);
+  ctx.fillText("加载图片后开始标注。", 32, 42);
   ctx.fillStyle = "rgba(255, 255, 255, 0.7)";
   ctx.font = '400 14px "Aptos", "Segoe UI Variable Text", sans-serif';
-  ctx.fillText("当前原型支持矩形、线条、多边形和导出功能。", 32, 68);
+  ctx.fillText("当前支持矩形、线段、多边形、历史恢复和 PNG 导出。", 32, 68);
   ctx.restore();
 }
 
@@ -144,7 +143,7 @@ function drawAnnotation(annotation, isDraft = false) {
   }
 
   if (annotation.type === "line") {
-    drawLineAnnotation(annotation, isDraft);
+    drawLineAnnotation(annotation);
     return;
   }
 
@@ -163,7 +162,6 @@ function drawRectangleAnnotation(annotation, isDraft) {
   const y = placement.y + annotation.y * placement.scale;
   const width = annotation.width * placement.scale;
   const height = annotation.height * placement.scale;
-  const label = `${Math.round(annotation.width)} x ${Math.round(annotation.height)} px`;
 
   ctx.save();
   ctx.lineWidth = selected ? 3 : 2;
@@ -171,11 +169,11 @@ function drawRectangleAnnotation(annotation, isDraft) {
   ctx.fillStyle = isDraft ? "rgba(255, 143, 98, 0.12)" : "rgba(255, 143, 98, 0.18)";
   ctx.strokeRect(x, y, width, height);
   ctx.fillRect(x, y, width, height);
-  drawLabel(x, Math.max(placement.y, y - 28), label);
+  drawLabel(x, Math.max(placement.y, y - 28), getAnnotationLabel(annotation));
   ctx.restore();
 }
 
-function drawLineAnnotation(annotation, isDraft) {
+function drawLineAnnotation(annotation) {
   const placement = state.imagePlacement;
   const selected = annotation.id === state.selectedId;
   const startX = placement.x + annotation.start.x * placement.scale;
@@ -184,7 +182,6 @@ function drawLineAnnotation(annotation, isDraft) {
   const endY = placement.y + annotation.end.y * placement.scale;
   const midX = (startX + endX) / 2;
   const midY = (startY + endY) / 2;
-  const label = `${Math.round(annotation.length)} px`;
 
   ctx.save();
   ctx.lineWidth = selected ? 3 : 2;
@@ -195,7 +192,7 @@ function drawLineAnnotation(annotation, isDraft) {
   ctx.stroke();
   drawVertex(startX, startY, selected);
   drawVertex(endX, endY, selected);
-  drawLabel(midX - 32, midY - 32, label);
+  drawLabel(midX - 32, midY - 32, getAnnotationLabel(annotation));
   ctx.restore();
 }
 
@@ -206,12 +203,12 @@ function drawPolygonAnnotation(annotation, isDraft) {
     x: placement.x + point.x * placement.scale,
     y: placement.y + point.y * placement.scale,
   }));
-  const centroid = getPolygonCentroid(points);
-  const label = `${Math.round(annotation.area)} px^2`;
 
   if (points.length < 2) {
     return;
   }
+
+  const centroid = getPolygonCentroid(points);
 
   ctx.save();
   ctx.lineWidth = selected ? 3 : 2;
@@ -226,7 +223,7 @@ function drawPolygonAnnotation(annotation, isDraft) {
   ctx.fill();
   ctx.stroke();
   points.forEach((point) => drawVertex(point.x, point.y, selected));
-  drawLabel(centroid.x - 36, centroid.y - 14, label);
+  drawLabel(centroid.x - 36, centroid.y - 14, getAnnotationLabel(annotation));
   ctx.restore();
 }
 
@@ -270,7 +267,7 @@ function drawVertex(x, y, selected) {
 }
 
 function drawLabel(x, y, label) {
-  const safeX = Math.max(12, Math.min(x, elements.canvas.width - 160));
+  const safeX = Math.max(12, Math.min(x, elements.canvas.width - 180));
   const safeY = Math.max(12, Math.min(y, elements.canvas.height - 36));
   ctx.font = '600 13px "Aptos", "Segoe UI Variable Text", sans-serif';
   const textWidth = ctx.measureText(label).width;
@@ -385,29 +382,43 @@ function getPolygonCentroid(points) {
   };
 }
 
+function getAnnotationLabel(annotation) {
+  const prefix = annotation.name ? `${annotation.name} · ` : "";
+
+  if (annotation.type === "line") {
+    return `${prefix}${Math.round(annotation.length)} px`;
+  }
+
+  if (annotation.type === "polygon") {
+    return `${prefix}${Math.round(annotation.area)} px²`;
+  }
+
+  return `${prefix}${Math.round(annotation.width)} × ${Math.round(annotation.height)} px`;
+}
+
 function getAnnotationSummary(annotation) {
-  const namePrefix = annotation.name ? `${annotation.name} - ` : "";
+  const prefix = annotation.name ? `${annotation.name} · ` : "";
 
   if (annotation.type === "line") {
     return {
-      title: `${namePrefix}线条 ${Math.round(annotation.length)} px`,
-      meta: `从 (${Math.round(annotation.start.x)}, ${Math.round(annotation.start.y)}) 到 (${Math.round(annotation.end.x)}, ${Math.round(annotation.end.y)})`,
+      title: `${prefix}线段 ${Math.round(annotation.length)} px`,
+      meta: `起点 (${Math.round(annotation.start.x)}, ${Math.round(annotation.start.y)})，终点 (${Math.round(annotation.end.x)}, ${Math.round(annotation.end.y)})`,
       selection: `${Math.round(annotation.length)} px`,
     };
   }
 
   if (annotation.type === "polygon") {
     return {
-      title: `${namePrefix}多边形 ${Math.round(annotation.area)} px^2`,
-      meta: `${annotation.points.length} 个顶点, 周长 ${Math.round(annotation.perimeter)} px`,
-      selection: `${Math.round(annotation.area)} px^2`,
+      title: `${prefix}多边形 ${Math.round(annotation.area)} px²`,
+      meta: `${annotation.points.length} 个顶点，周长 ${Math.round(annotation.perimeter)} px`,
+      selection: `${Math.round(annotation.area)} px²`,
     };
   }
 
   return {
-    title: `${namePrefix}${Math.round(annotation.width)} x ${Math.round(annotation.height)} px`,
-    meta: `面积 ${Math.round(annotation.area)} px^2, 原点 (${Math.round(annotation.x)}, ${Math.round(annotation.y)})`,
-    selection: `${Math.round(annotation.width)} x ${Math.round(annotation.height)}`,
+    title: `${prefix}${Math.round(annotation.width)} × ${Math.round(annotation.height)} px`,
+    meta: `面积 ${Math.round(annotation.area)} px²，起点 (${Math.round(annotation.x)}, ${Math.round(annotation.y)})`,
+    selection: `${Math.round(annotation.width)} × ${Math.round(annotation.height)} px`,
   };
 }
 
@@ -425,8 +436,8 @@ function resetDraftState() {
 }
 
 function refreshOverlay() {
-  const headline = state.imageName || "画布就绪。";
-  const message = state.image ? getToolInstructions() : "加载本地图片开始标注。";
+  const headline = state.imageName || "画布已就绪";
+  const message = state.image ? getToolInstructions() : "加载一张本地图片后开始标注。";
   elements.overlay.innerHTML = `<strong>${headline}</strong><span>${message}</span>`;
 }
 
@@ -440,19 +451,22 @@ function setCurrentTool(tool) {
 }
 
 function formatDate(isoString) {
-  if (!isoString) return "";
-  try {
-    const date = new Date(isoString);
-    return date.toLocaleString("zh-CN", {
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch {
+  if (!isoString) {
+    return "";
+  }
+
+  const date = new Date(isoString);
+  if (Number.isNaN(date.getTime())) {
     return isoString;
   }
+
+  return date.toLocaleString("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function renderAnnotationList() {
@@ -464,7 +478,7 @@ function renderAnnotationList() {
     return;
   }
 
-  const items = [...state.annotations]
+  elements.annotationList.innerHTML = [...state.annotations]
     .reverse()
     .map((annotation) => {
       const activeClass = annotation.id === state.selectedId ? "annotation-item active" : "annotation-item";
@@ -477,8 +491,6 @@ function renderAnnotationList() {
       `;
     })
     .join("");
-
-  elements.annotationList.innerHTML = items;
 
   const selected = state.annotations.find((annotation) => annotation.id === state.selectedId);
   elements.selectionSize.textContent = selected ? getAnnotationSummary(selected).selection : "无";
@@ -498,7 +510,7 @@ function updateAnnotationNameEditor() {
     return;
   }
 
-  const annotation = state.annotations.find((a) => a.id === state.selectedId);
+  const annotation = state.annotations.find((item) => item.id === state.selectedId);
   if (!annotation) {
     elements.annotationNameEditor.classList.add("hidden");
     elements.annotationNameInput.value = "";
@@ -515,17 +527,56 @@ function saveAnnotationName() {
     return;
   }
 
-  const annotation = state.annotations.find((a) => a.id === state.selectedId);
+  const annotation = state.annotations.find((item) => item.id === state.selectedId);
   if (!annotation) {
-    setStatus("未找到选中的标注。", "error");
+    setStatus("没有找到当前选中的标注。", "error");
     return;
   }
 
-  const name = elements.annotationNameInput.value.trim();
-  annotation.name = name;
-
+  annotation.name = elements.annotationNameInput.value.trim();
   renderAnnotationList();
-  setStatus(name ? `标注名称已更新: "${name}"` : "已清除标注名称。");
+  drawScene();
+  setStatus(annotation.name ? `已更新标注名称：${annotation.name}` : "已清空当前标注名称。");
+}
+
+function resetSessionStateForNewImage() {
+  state.annotations = [];
+  state.selectedId = null;
+  resetDraftState();
+  renderAnnotationList();
+  updateAnnotationNameEditor();
+}
+
+function loadImageFromSource(source, fileName, options = {}) {
+  const { imageFile = null, preserveAnnotations = false, afterLoad } = options;
+  const image = new Image();
+
+  image.onload = () => {
+    state.image = image;
+    state.imageName = fileName || "未命名图片";
+    state.imageFile = imageFile;
+
+    if (!preserveAnnotations) {
+      resetSessionStateForNewImage();
+    }
+
+    elements.fileName.textContent = state.imageName;
+    elements.imageSize.textContent = `${image.width} × ${image.height}`;
+    refreshOverlay();
+    computeImagePlacement();
+    renderAnnotationList();
+    drawScene();
+
+    if (typeof afterLoad === "function") {
+      afterLoad();
+    }
+  };
+
+  image.onerror = () => {
+    setStatus("图片加载失败。", "error");
+  };
+
+  image.src = source;
 }
 
 function loadImage(file) {
@@ -534,42 +585,21 @@ function loadImage(file) {
     return;
   }
 
-  state.imageFile = file;
-
-  const image = new Image();
   const objectUrl = URL.createObjectURL(file);
-
-  image.onload = () => {
-    state.image = image;
-    state.imageName = file.name;
-    state.annotations = [];
-    state.selectedId = null;
-    resetDraftState();
-    elements.fileName.textContent = file.name;
-    elements.imageSize.textContent = `${image.width} x ${image.height}`;
-    refreshOverlay();
-    setStatus(`图片已加载。${getToolInstructions()}`);
-    syncCanvasSize();
-    renderAnnotationList();
-    drawScene();
-    URL.revokeObjectURL(objectUrl);
-  };
-
-  image.onerror = () => {
-    elements.fileName.textContent = "未选择图片";
-    setStatus("无法打开所选文件作为图片。", "error");
-    URL.revokeObjectURL(objectUrl);
-  };
-
-  image.src = objectUrl;
+  loadImageFromSource(objectUrl, file.name, {
+    imageFile: file,
+    preserveAnnotations: false,
+    afterLoad: () => {
+      setStatus(`图片已加载。${getToolInstructions()}`);
+      URL.revokeObjectURL(objectUrl);
+    },
+  });
 }
 
 function exportAnnotatedImage() {
-  if (!state.image || !state.imagePlacement) {
+  if (!state.image) {
     return null;
   }
-
-  const placement = state.imagePlacement;
 
   const tempCanvas = document.createElement("canvas");
   tempCanvas.width = state.image.width;
@@ -578,8 +608,6 @@ function exportAnnotatedImage() {
 
   tempCtx.drawImage(state.image, 0, 0);
 
-  const scaleRatio = 1 / placement.scale;
-
   state.annotations.forEach((annotation) => {
     if (annotation.type === "rectangle") {
       tempCtx.lineWidth = 3;
@@ -587,28 +615,34 @@ function exportAnnotatedImage() {
       tempCtx.fillStyle = "rgba(255, 143, 98, 0.18)";
       tempCtx.strokeRect(annotation.x, annotation.y, annotation.width, annotation.height);
       tempCtx.fillRect(annotation.x, annotation.y, annotation.width, annotation.height);
-    } else if (annotation.type === "line") {
+      return;
+    }
+
+    if (annotation.type === "line") {
       tempCtx.lineWidth = 3;
       tempCtx.strokeStyle = "#55d5ff";
       tempCtx.beginPath();
       tempCtx.moveTo(annotation.start.x, annotation.start.y);
       tempCtx.lineTo(annotation.end.x, annotation.end.y);
       tempCtx.stroke();
-    } else if (annotation.type === "polygon") {
-      tempCtx.lineWidth = 3;
-      tempCtx.strokeStyle = "#8ae35f";
-      tempCtx.fillStyle = "rgba(138, 227, 95, 0.22)";
-      tempCtx.beginPath();
-      if (annotation.points.length > 0) {
-        tempCtx.moveTo(annotation.points[0].x, annotation.points[0].y);
-        for (let i = 1; i < annotation.points.length; i++) {
-          tempCtx.lineTo(annotation.points[i].x, annotation.points[i].y);
-        }
-        tempCtx.closePath();
-        tempCtx.fill();
-        tempCtx.stroke();
-      }
+      return;
     }
+
+    if (!annotation.points?.length) {
+      return;
+    }
+
+    tempCtx.lineWidth = 3;
+    tempCtx.strokeStyle = "#8ae35f";
+    tempCtx.fillStyle = "rgba(138, 227, 95, 0.22)";
+    tempCtx.beginPath();
+    tempCtx.moveTo(annotation.points[0].x, annotation.points[0].y);
+    for (let index = 1; index < annotation.points.length; index += 1) {
+      tempCtx.lineTo(annotation.points[index].x, annotation.points[index].y);
+    }
+    tempCtx.closePath();
+    tempCtx.fill();
+    tempCtx.stroke();
   });
 
   return tempCanvas.toDataURL("image/png");
@@ -616,98 +650,107 @@ function exportAnnotatedImage() {
 
 function downloadAnnotatedImage() {
   if (!state.image) {
-    setStatus("下载前请先加载图片。", "error");
+    setStatus("请先加载图片后再导出。", "error");
     return;
   }
 
   const imageData = exportAnnotatedImage();
   if (!imageData) {
-    setStatus("无法导出图片。", "error");
+    setStatus("导出 PNG 失败。", "error");
     return;
   }
 
   const link = document.createElement("a");
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-").substring(0, 19);
-  const projectName = elements.projectName.value.trim() || "annotation";
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  const projectName = elements.projectName.value.trim() || "geodraft";
   link.download = `${projectName}-${timestamp}.png`;
   link.href = imageData;
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
+  setStatus(`已导出标注图：${link.download}`);
+}
 
-  setStatus(`图片已下载: ${link.download}`);
+function serializeAnnotations() {
+  return state.annotations.map((annotation) => ({
+    id: annotation.id,
+    type: annotation.type,
+    name: annotation.name || "",
+    x: annotation.x !== undefined ? Number(annotation.x.toFixed(2)) : undefined,
+    y: annotation.y !== undefined ? Number(annotation.y.toFixed(2)) : undefined,
+    width: annotation.width !== undefined ? Number(annotation.width.toFixed(2)) : undefined,
+    height: annotation.height !== undefined ? Number(annotation.height.toFixed(2)) : undefined,
+    area: annotation.area !== undefined ? Number(annotation.area.toFixed(2)) : undefined,
+    length: annotation.length !== undefined ? Number(annotation.length.toFixed(2)) : undefined,
+    perimeter: annotation.perimeter !== undefined ? Number(annotation.perimeter.toFixed(2)) : undefined,
+    start: annotation.start
+      ? {
+          x: Number(annotation.start.x.toFixed(2)),
+          y: Number(annotation.start.y.toFixed(2)),
+        }
+      : undefined,
+    end: annotation.end
+      ? {
+          x: Number(annotation.end.x.toFixed(2)),
+          y: Number(annotation.end.y.toFixed(2)),
+        }
+      : undefined,
+    points: annotation.points
+      ? annotation.points.map((point) => ({
+          x: Number(point.x.toFixed(2)),
+          y: Number(point.y.toFixed(2)),
+        }))
+      : undefined,
+  }));
+}
+
+function readFileAsDataUrl(file) {
+  if (!file) {
+    return Promise.resolve(null);
+  }
+
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
 }
 
 async function saveAnnotations() {
   if (!state.image) {
-    setStatus("保存前请先加载图片。", "error");
+    setStatus("请先加载图片后再保存。", "error");
     return;
   }
 
-  const annotatedImageData = exportAnnotatedImage();
-  if (!annotatedImageData) {
-    setStatus("无法导出标注图片。", "error");
+  const annotatedImage = exportAnnotatedImage();
+  if (!annotatedImage) {
+    setStatus("导出标注图失败，无法保存。", "error");
     return;
   }
 
-  let originalImageData = null;
-  if (state.imageFile) {
-    try {
-      const reader = new FileReader();
-      originalImageData = await new Promise((resolve) => {
-        reader.onload = () => resolve(reader.result);
-        reader.readAsDataURL(state.imageFile);
-      });
-    } catch (e) {
-      console.warn("无法读取原始图片:", e);
-    }
+  let originalImage = null;
+  try {
+    originalImage = await readFileAsDataUrl(state.imageFile);
+  } catch (error) {
+    console.warn("Failed to read original image:", error);
   }
 
   const payload = {
     projectName: elements.projectName.value.trim() || "GeoDraft Prototype",
-    projectNotes: elements.projectNotes.value.trim() || "",
+    projectNotes: elements.projectNotes.value.trim(),
     imageMeta: {
       name: state.imageName,
       width: state.image.width,
       height: state.image.height,
     },
-    annotations: state.annotations.map((annotation) => ({
-      id: annotation.id,
-      type: annotation.type,
-      name: annotation.name || "",
-      x: annotation.x !== undefined ? Number(annotation.x.toFixed(2)) : undefined,
-      y: annotation.y !== undefined ? Number(annotation.y.toFixed(2)) : undefined,
-      width: annotation.width !== undefined ? Number(annotation.width.toFixed(2)) : undefined,
-      height: annotation.height !== undefined ? Number(annotation.height.toFixed(2)) : undefined,
-      area: annotation.area !== undefined ? Number(annotation.area.toFixed(2)) : undefined,
-      length: annotation.length !== undefined ? Number(annotation.length.toFixed(2)) : undefined,
-      perimeter: annotation.perimeter !== undefined ? Number(annotation.perimeter.toFixed(2)) : undefined,
-      start: annotation.start
-        ? {
-            x: Number(annotation.start.x.toFixed(2)),
-            y: Number(annotation.start.y.toFixed(2)),
-          }
-        : undefined,
-      end: annotation.end
-        ? {
-            x: Number(annotation.end.x.toFixed(2)),
-            y: Number(annotation.end.y.toFixed(2)),
-          }
-        : undefined,
-      points: annotation.points
-        ? annotation.points.map((point) => ({
-            x: Number(point.x.toFixed(2)),
-            y: Number(point.y.toFixed(2)),
-          }))
-        : undefined,
-    })),
-    originalImage: originalImageData,
-    annotatedImage: annotatedImageData,
+    annotations: serializeAnnotations(),
+    originalImage,
+    annotatedImage,
   };
 
   try {
-    setStatus("正在保存...");
-
+    setStatus("正在保存项目...");
     const response = await fetch("/api/annotations", {
       method: "POST",
       headers: {
@@ -721,10 +764,8 @@ async function saveAnnotations() {
       throw new Error(body.error || "保存失败。");
     }
 
-    const savedFiles = body.savedFiles || [];
-    const filesInfo = savedFiles.length > 0 ? `\n保存的文件: ${savedFiles.join(", ")}` : "";
-    setStatus(`已保存 ${state.annotations.length} 个标注到 data/ 目录。前缀: ${body.filePrefix}${filesInfo}`);
     await loadHistoryList();
+    setStatus(`已保存 ${state.annotations.length} 个标注到 data/，前缀：${body.filePrefix}`);
   } catch (error) {
     setStatus(error.message || "保存失败。", "error");
   }
@@ -732,100 +773,96 @@ async function saveAnnotations() {
 
 async function loadHistoryList() {
   try {
-    const response = await fetch("/api/sessions", {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-      },
-    });
-
+    const response = await fetch("/api/sessions");
     const body = await response.json();
+
     if (!response.ok) {
-      throw new Error(body.error || "加载历史记录失败。");
+      throw new Error(body.error || "加载历史失败。");
     }
 
     state.sessions = body.sessions || [];
     renderHistoryList();
   } catch (error) {
-    console.warn("加载历史记录失败:", error);
+    console.warn("Failed to load history:", error);
+    elements.historyList.innerHTML = '<li class="empty-state">历史记录加载失败。</li>';
   }
 }
 
 function renderHistoryList() {
   if (!state.sessions.length) {
-    elements.historyList.innerHTML = '<li class="empty-state">暂无保存的会话。</li>';
+    elements.historyList.innerHTML = '<li class="empty-state">还没有保存过项目。</li>';
     return;
   }
 
-  const items = state.sessions
+  elements.historyList.innerHTML = state.sessions
     .map((session) => {
-      const dateStr = formatDate(session.savedAt);
-      const notesPreview = session.notes ? ` - ${session.notes.substring(0, 20)}${session.notes.length > 20 ? "..." : ""}` : "";
+      const notePreview = session.notes
+        ? `${session.notes.slice(0, 26)}${session.notes.length > 26 ? "..." : ""}`
+        : "无备注";
       return `
         <li class="history-item" data-filename="${session.filePrefix}">
-          <p class="history-item-title">${session.projectName}${notesPreview}</p>
+          <p class="history-item-title">${session.projectName}</p>
           <p class="history-item-meta">
-            <span>${dateStr}</span>
+            <span>${formatDate(session.savedAt)}</span>
             <span>${session.annotationCount} 个标注</span>
+          </p>
+          <p class="history-item-meta">
+            <span>${session.imageName || "未记录图片名"}</span>
+            <span>${notePreview}</span>
           </p>
         </li>
       `;
     })
     .join("");
-
-  elements.historyList.innerHTML = items;
 }
 
 async function loadSession(filePrefix) {
   try {
-    setStatus("正在加载会话...");
-
-    const response = await fetch(`/api/sessions/${encodeURIComponent(filePrefix)}`, {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-      },
-    });
-
+    setStatus("正在加载历史项目...");
+    const response = await fetch(`/api/sessions/${encodeURIComponent(filePrefix)}`);
     const body = await response.json();
+
     if (!response.ok) {
-      throw new Error(body.error || "加载会话失败。");
+      throw new Error(body.error || "加载历史项目失败。");
     }
 
-    const projectName = body.projectName || "GeoDraft";
-    const projectNotes = body.projectNotes || "";
-    const annotations = body.annotations || [];
-    const imageMeta = body.imageMeta || {};
-
-    elements.projectName.value = projectName;
-    elements.projectNotes.value = projectNotes;
-
-    state.annotations = annotations;
+    elements.projectName.value = body.projectName || "GeoDraft Prototype";
+    elements.projectNotes.value = body.projectNotes || "";
+    state.annotations = Array.isArray(body.annotations) ? body.annotations : [];
     state.selectedId = null;
+    resetDraftState();
+    renderAnnotationList();
+    updateAnnotationNameEditor();
 
-    if (body.annotatedImage) {
-      const img = new Image();
-      img.onload = () => {
-        state.image = img;
-        state.imageName = imageMeta.name || "已加载的图片";
-        elements.fileName.textContent = state.imageName;
-        elements.imageSize.textContent = img.width ? `${img.width} x ${img.height}` : "已加载";
-        syncCanvasSize();
-        renderAnnotationList();
-        drawScene();
-        setStatus(`已加载会话: ${projectName} (${annotations.length} 个标注)`);
-      };
-      img.onerror = () => {
-        renderAnnotationList();
-        setStatus(`已加载会话: ${projectName} (${annotations.length} 个标注)。请重新加载图片文件。`);
-      };
-      img.src = body.annotatedImage;
-    } else {
-      renderAnnotationList();
-      setStatus(`已加载会话: ${projectName} (${annotations.length} 个标注)。请重新加载图片文件。`);
+    const imageMeta = body.imageMeta || {};
+    const preferredImage = body.originalImage || body.annotatedImage;
+
+    if (preferredImage) {
+      loadImageFromSource(preferredImage, imageMeta.name || "已恢复图片", {
+        preserveAnnotations: true,
+        imageFile: null,
+        afterLoad: () => {
+          const message = body.originalImage
+            ? `已加载历史项目：${elements.projectName.value}`
+            : `已加载历史项目：${elements.projectName.value}。当前显示的是已标注预览图。`;
+          setStatus(message);
+        },
+      });
+      return;
     }
+
+    state.image = null;
+    state.imageName = imageMeta.name || "";
+    state.imageFile = null;
+    state.imagePlacement = null;
+    elements.fileName.textContent = imageMeta.name || "未恢复原图";
+    elements.imageSize.textContent =
+      imageMeta.width && imageMeta.height ? `${imageMeta.width} × ${imageMeta.height}` : "无文件";
+    refreshOverlay();
+    drawScene();
+    setStatus("标注数据已恢复，但没有找到图片文件，请重新选择原图。", "error");
   } catch (error) {
-    setStatus(error.message || "加载会话失败。", "error");
+    setStatus(error.message || "加载历史项目失败。", "error");
   }
 }
 
@@ -837,7 +874,7 @@ function finalizePolygon() {
 
   const polygon = createPolygonAnnotation([...state.polygonPoints]);
   if (polygon.area < 16) {
-    setStatus("忽略了一个太小的多边形。", "error");
+    setStatus("这个多边形太小，已忽略。", "error");
     resetDraftState();
     drawScene();
     return;
@@ -847,8 +884,9 @@ function finalizePolygon() {
   state.selectedId = polygon.id;
   resetDraftState();
   renderAnnotationList();
+  updateAnnotationNameEditor();
   drawScene();
-  setStatus(`已添加多边形，面积 ${Math.round(polygon.area)} px^2。`);
+  setStatus(`已添加多边形，面积 ${Math.round(polygon.area)} px²。`);
 }
 
 elements.imageLoader.addEventListener("change", (event) => {
@@ -864,7 +902,7 @@ elements.toolButtons.forEach((button) => {
 
 elements.canvas.addEventListener("pointerdown", (event) => {
   if (!state.image) {
-    setStatus("绘制前请先加载图片。", "error");
+    setStatus("请先加载图片。", "error");
     return;
   }
 
@@ -874,13 +912,14 @@ elements.canvas.addEventListener("pointerdown", (event) => {
   }
 
   state.selectedId = null;
+  updateAnnotationNameEditor();
 
   if (state.currentTool === "polygon") {
     state.polygonPoints.push(point);
     state.draftAnnotation = null;
     renderAnnotationList();
     drawScene();
-    setStatus(`已添加多边形顶点 ${state.polygonPoints.length}。双击完成。`);
+    setStatus(`已添加顶点 ${state.polygonPoints.length}，双击或按 Enter 完成。`);
     return;
   }
 
@@ -939,6 +978,7 @@ elements.canvas.addEventListener("pointerup", (event) => {
     state.currentTool === "line"
       ? createLineAnnotation(state.pointerStart, point)
       : normalizeRectangle(state.pointerStart, point);
+
   state.pointerStart = null;
   state.draftAnnotation = null;
 
@@ -948,7 +988,7 @@ elements.canvas.addEventListener("pointerup", (event) => {
       : annotation.width < 4 || annotation.height < 4;
 
   if (tooSmall) {
-    setStatus(`忽略了一个太小的 ${state.currentTool} 标注。`, "error");
+    setStatus(`这个${state.currentTool === "line" ? "线段" : "矩形"}太小，已忽略。`, "error");
     drawScene();
     return;
   }
@@ -956,11 +996,12 @@ elements.canvas.addEventListener("pointerup", (event) => {
   state.annotations.push(annotation);
   state.selectedId = annotation.id;
   renderAnnotationList();
+  updateAnnotationNameEditor();
   drawScene();
   setStatus(
     state.currentTool === "line"
-      ? `已添加线条测量 ${Math.round(annotation.length)} px。`
-      : `已添加矩形 ${Math.round(annotation.width)} x ${Math.round(annotation.height)} px。`
+      ? `已添加线段，长度 ${Math.round(annotation.length)} px。`
+      : `已添加矩形，尺寸 ${Math.round(annotation.width)} × ${Math.round(annotation.height)} px。`
   );
 });
 
@@ -1015,14 +1056,23 @@ elements.annotationList.addEventListener("click", (event) => {
   selectAnnotation(item.dataset.id);
 });
 
+elements.historyList.addEventListener("click", (event) => {
+  const item = event.target.closest("[data-filename]");
+  if (!item) {
+    return;
+  }
+
+  loadSession(item.dataset.filename);
+});
+
 elements.clearButton.addEventListener("click", () => {
   state.annotations = [];
   state.selectedId = null;
   resetDraftState();
   renderAnnotationList();
-  drawScene();
   updateAnnotationNameEditor();
-  setStatus("已清除所有标注。");
+  drawScene();
+  setStatus("已清空当前图片上的所有标注。");
 });
 
 elements.downloadButton.addEventListener("click", () => {
@@ -1044,16 +1094,9 @@ elements.saveButton.addEventListener("click", () => {
   saveAnnotations();
 });
 
-elements.refreshHistory.addEventListener("click", () => {
-  loadHistoryList();
-  setStatus("已刷新历史记录。");
-});
-
-elements.historyList.addEventListener("click", (event) => {
-  const historyItem = event.target.closest(".history-item");
-  if (historyItem && historyItem.dataset.filename) {
-    loadSession(historyItem.dataset.filename);
-  }
+elements.refreshHistory.addEventListener("click", async () => {
+  await loadHistoryList();
+  setStatus("历史记录已刷新。");
 });
 
 window.addEventListener("resize", syncCanvasSize);

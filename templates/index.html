@@ -12,9 +12,7 @@
         <div class="brand-block">
           <p class="eyebrow">Graphics Utility Prototype</p>
           <h1>GeoDraft</h1>
-          <p class="subtitle">
-            A local-first image annotation and geometric measurement workspace.
-          </p>
+          <p class="subtitle">一个本地优先的图片标注与几何测量工具。</p>
         </div>
 
         <section class="panel">
@@ -22,7 +20,7 @@
           <input id="project-name" type="text" value="GeoDraft Prototype" />
 
           <label class="field-label" for="project-notes">项目备注</label>
-          <textarea id="project-notes" placeholder="输入项目备注说明..."></textarea>
+          <textarea id="project-notes" placeholder="写一点说明，方便以后回看。"></textarea>
 
           <label class="field-label" for="image-loader">加载图片</label>
           <div class="file-picker">
@@ -30,7 +28,7 @@
             <label for="image-loader" class="file-trigger">选择图片</label>
             <div class="file-meta">
               <strong id="file-name">未选择图片</strong>
-              <span>支持格式: PNG, JPG, JPEG, WebP, BMP</span>
+              <span>支持 PNG、JPG、JPEG、WebP、BMP</span>
             </div>
           </div>
 
@@ -38,23 +36,57 @@
             <span class="field-label">工具</span>
             <div class="tool-group">
               <button data-tool="rectangle" class="tool-button active" type="button">矩形</button>
-              <button data-tool="line" class="tool-button" type="button">线条</button>
+              <button data-tool="line" class="tool-button" type="button">线段</button>
               <button data-tool="polygon" class="tool-button" type="button">多边形</button>
             </div>
             <p class="tool-help">
-              矩形：拖动测量。线条：两点之间拖动。多边形：点击添加顶点，双击完成。
+              矩形用来框选区域，线段用来测距离，多边形适合不规则区域，双击可完成闭合。
             </p>
           </div>
 
           <div class="actions">
-            <button id="clear-button" class="ghost" type="button">清除标注</button>
-            <button id="download-button" class="ghost" type="button">下载图片</button>
-            <button id="save-button" class="primary" type="button">保存到后端</button>
+            <button id="clear-button" class="ghost" type="button">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M4 7h16M9 7V5h6v2M10 11v6M14 11v6M7 7l1 12h8l1-12"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="1.8"
+                ></path>
+              </svg>
+              <span>清空标注</span>
+            </button>
+            <button id="download-button" class="ghost" type="button">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M12 4v10M8 10l4 4 4-4M5 19h14"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="1.8"
+                ></path>
+              </svg>
+              <span>导出 PNG</span>
+            </button>
+            <button id="save-button" class="primary" type="button">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M5 5h11l3 3v11H5V5zm3 0v5h8V6.5M9 19v-5h6v5"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="1.8"
+                ></path>
+              </svg>
+              <span>保存到本地</span>
+            </button>
           </div>
 
-          <p id="status-line" class="status-line">
-            加载图片并在画布上拖动以创建测量框。
-          </p>
+          <p id="status-line" class="status-line">加载图片后，就可以开始标注和测量。</p>
         </section>
 
         <section class="panel metrics">
@@ -63,7 +95,7 @@
             <strong id="annotation-count">0</strong>
           </div>
           <div class="metric-card">
-            <span class="metric-label">选中项</span>
+            <span class="metric-label">当前选中</span>
             <strong id="selection-size">无</strong>
           </div>
           <div class="metric-card">
@@ -77,19 +109,19 @@
             <h2>历史记录</h2>
             <button id="refresh-history" class="refresh-button" type="button" title="刷新历史">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M1 4v6h6M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>
+                <path d="M1 4v6h6M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
               </svg>
             </button>
           </div>
           <ul id="history-list" class="history-list">
-            <li class="empty-state">暂无保存的会话。</li>
+            <li class="empty-state">还没有保存过项目。</li>
           </ul>
         </section>
 
         <section class="panel">
           <div class="panel-heading">
             <h2>标注列表</h2>
-            <span id="annotation-hint">最新优先</span>
+            <span id="annotation-hint">最新创建的排前面</span>
           </div>
           <ul id="annotation-list" class="annotation-list">
             <li class="empty-state">暂无标注。</li>
@@ -97,8 +129,8 @@
 
           <div id="annotation-name-editor" class="annotation-name-editor hidden">
             <label class="field-label" for="annotation-name-input">标注名称</label>
-            <div style="display: flex; gap: 8px;">
-              <input id="annotation-name-input" type="text" placeholder="输入标注名称..." />
+            <div class="annotation-name-row">
+              <input id="annotation-name-input" type="text" placeholder="给当前标注起个名字。" />
               <button id="save-annotation-name" type="button">保存</button>
             </div>
           </div>
@@ -108,19 +140,17 @@
       <main class="workspace">
         <div class="workspace-header">
           <div>
-            <p class="eyebrow">画布工作区</p>
+            <p class="eyebrow">Canvas Workspace</p>
             <h2>图片标注</h2>
           </div>
-          <p class="workspace-note">
-            支持图片导入、矩形和线条测量、多边形区域标记、本地保存。
-          </p>
+          <p class="workspace-note">支持图片导入、几何标注、项目备注、历史恢复和标注图导出。</p>
         </div>
 
         <section class="canvas-panel">
           <canvas id="draft-canvas" aria-label="GeoDraft canvas"></canvas>
           <div id="canvas-overlay" class="canvas-overlay">
-            <strong>画布就绪。</strong>
-            <span>加载本地图片开始标注。</span>
+            <strong>画布已就绪</strong>
+            <span>先加载一张本地图片，再开始标注。</span>
           </div>
         </section>
       </main>
