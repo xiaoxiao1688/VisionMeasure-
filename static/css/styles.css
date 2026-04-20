@@ -520,10 +520,50 @@ textarea {
   background: rgba(214, 106, 61, 0.08);
 }
 
+.history-item-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
 .history-item-title {
   margin: 0 0 4px;
   font-weight: 700;
   font-size: 0.9rem;
+  min-width: 0;
+}
+
+.history-delete-button {
+  appearance: none;
+  border: 0;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 999px;
+  background: rgba(25, 50, 60, 0.08);
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 28px;
+  cursor: pointer;
+  transition: background-color 140ms ease, color 140ms ease, transform 140ms ease;
+}
+
+.history-delete-button svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+
+.history-delete-button:hover {
+  background: rgba(184, 79, 37, 0.12);
+  color: var(--accent-strong);
+}
+
+.history-delete-button:active {
+  transform: scale(0.96);
 }
 
 .history-item-meta {

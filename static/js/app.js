@@ -24,6 +24,7 @@ const elements = {
 const state = {
   annotations: [],
   currentTool: "rectangle",
+  currentSessionPrefix: null,
   drawing: false,
   draftAnnotation: null,
   image: null,
@@ -450,6 +451,15 @@ function setCurrentTool(tool) {
   drawScene();
 }
 
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
 function formatDate(isoString) {
   if (!isoString) {
     return "";
@@ -585,6 +595,7 @@ function loadImage(file) {
     return;
   }
 
+  state.currentSessionPrefix = null;
   const objectUrl = URL.createObjectURL(file);
   loadImageFromSource(objectUrl, file.name, {
     imageFile: file,
@@ -801,14 +812,34 @@ function renderHistoryList() {
         : "无备注";
       return `
         <li class="history-item" data-filename="${session.filePrefix}">
-          <p class="history-item-title">${session.projectName}</p>
+          <div class="history-item-header">
+            <p class="history-item-title">${escapeHtml(session.projectName)}</p>
+            <button
+              class="history-delete-button"
+              type="button"
+              data-delete-prefix="${session.filePrefix}"
+              aria-label="删除 ${escapeHtml(session.projectName)}"
+              title="删除这条历史"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M4 7h16M9 7V5h6v2M10 11v6M14 11v6M7 7l1 12h8l1-12"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="1.8"
+                ></path>
+              </svg>
+            </button>
+          </div>
           <p class="history-item-meta">
             <span>${formatDate(session.savedAt)}</span>
             <span>${session.annotationCount} 个标注</span>
           </p>
           <p class="history-item-meta">
-            <span>${session.imageName || "未记录图片名"}</span>
-            <span>${notePreview}</span>
+            <span>${escapeHtml(session.imageName || "未记录图片名")}</span>
+            <span>${escapeHtml(notePreview)}</span>
           </p>
         </li>
       `;
@@ -828,6 +859,7 @@ async function loadSession(filePrefix) {
 
     elements.projectName.value = body.projectName || "GeoDraft Prototype";
     elements.projectNotes.value = body.projectNotes || "";
+    state.currentSessionPrefix = filePrefix;
     state.annotations = Array.isArray(body.annotations) ? body.annotations : [];
     state.selectedId = null;
     resetDraftState();
@@ -863,6 +895,40 @@ async function loadSession(filePrefix) {
     setStatus("标注数据已恢复，但没有找到图片文件，请重新选择原图。", "error");
   } catch (error) {
     setStatus(error.message || "加载历史项目失败。", "error");
+  }
+}
+
+async function deleteSession(filePrefix) {
+  const session = state.sessions.find((item) => item.filePrefix === filePrefix);
+  const sessionName = session?.projectName || "这个历史项目";
+
+  if (!window.confirm(`确定删除“${sessionName}”吗？这会同时删除保存的 JSON 和预览图片。`)) {
+    return;
+  }
+
+  try {
+    setStatus(`正在删除历史项目：${sessionName}`);
+    const response = await fetch(`/api/sessions/${encodeURIComponent(filePrefix)}`, {
+      method: "DELETE",
+    });
+    const body = await response.json();
+
+    if (!response.ok) {
+      throw new Error(body.error || "删除历史项目失败。");
+    }
+
+    state.sessions = state.sessions.filter((item) => item.filePrefix !== filePrefix);
+    renderHistoryList();
+
+    if (state.currentSessionPrefix === filePrefix) {
+      state.currentSessionPrefix = null;
+      setStatus(`已删除当前历史项目：${sessionName}。当前画布内容保留，但不再对应已保存记录。`);
+      return;
+    }
+
+    setStatus(`已删除历史项目：${sessionName}`);
+  } catch (error) {
+    setStatus(error.message || "删除历史项目失败。", "error");
   }
 }
 
@@ -1057,6 +1123,13 @@ elements.annotationList.addEventListener("click", (event) => {
 });
 
 elements.historyList.addEventListener("click", (event) => {
+  const deleteButton = event.target.closest("[data-delete-prefix]");
+  if (deleteButton) {
+    event.stopPropagation();
+    deleteSession(deleteButton.dataset.deletePrefix);
+    return;
+  }
+
   const item = event.target.closest("[data-filename]");
   if (!item) {
     return;

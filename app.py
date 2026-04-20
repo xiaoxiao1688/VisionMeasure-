@@ -115,6 +115,35 @@ def get_session(file_prefix: str):
     return jsonify(content), 200
 
 
+@app.delete("/api/sessions/<file_prefix>")
+def delete_session(file_prefix: str):
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+    safe_prefix = _safe_prefix(file_prefix)
+    if not safe_prefix:
+        return jsonify({"error": "Invalid session id."}), 400
+
+    targets = [
+        DATA_DIR / f"{safe_prefix}.json",
+        DATA_DIR / f"{safe_prefix}-original.png",
+        DATA_DIR / f"{safe_prefix}-annotated.png",
+    ]
+
+    deleted_files: list[str] = []
+    for target in targets:
+        if target.exists():
+            try:
+                target.unlink()
+                deleted_files.append(target.name)
+            except OSError as error:
+                return jsonify({"error": f"Failed to delete {target.name}: {error}"}), 500
+
+    if not deleted_files:
+        return jsonify({"error": "Session not found."}), 404
+
+    return jsonify({"message": "Session deleted successfully.", "deletedFiles": deleted_files}), 200
+
+
 @app.post("/api/annotations")
 def save_annotations():
     payload = request.get_json(silent=True)
