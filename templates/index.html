@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -18,83 +18,109 @@
         </div>
 
         <section class="panel">
-          <label class="field-label" for="project-name">Project name</label>
+          <label class="field-label" for="project-name">项目名称</label>
           <input id="project-name" type="text" value="GeoDraft Prototype" />
 
-          <label class="field-label" for="image-loader">Load image</label>
+          <label class="field-label" for="project-notes">项目备注</label>
+          <textarea id="project-notes" placeholder="输入项目备注说明..."></textarea>
+
+          <label class="field-label" for="image-loader">加载图片</label>
           <div class="file-picker">
             <input id="image-loader" class="file-input" type="file" accept="image/*" />
-            <label for="image-loader" class="file-trigger">Select Image</label>
+            <label for="image-loader" class="file-trigger">选择图片</label>
             <div class="file-meta">
-              <strong id="file-name">No image selected</strong>
-              <span>Supported: PNG, JPG, JPEG, WebP, BMP</span>
+              <strong id="file-name">未选择图片</strong>
+              <span>支持格式: PNG, JPG, JPEG, WebP, BMP</span>
             </div>
           </div>
 
           <div class="tool-row">
-            <span class="field-label">Tool</span>
+            <span class="field-label">工具</span>
             <div class="tool-group">
-              <button data-tool="rectangle" class="tool-button active" type="button">Rectangle</button>
-              <button data-tool="line" class="tool-button" type="button">Line</button>
-              <button data-tool="polygon" class="tool-button" type="button">Polygon</button>
+              <button data-tool="rectangle" class="tool-button active" type="button">矩形</button>
+              <button data-tool="line" class="tool-button" type="button">线条</button>
+              <button data-tool="polygon" class="tool-button" type="button">多边形</button>
             </div>
             <p class="tool-help">
-              Rectangle: drag to measure. Line: drag between two points. Polygon: click to add vertices, double-click to finish.
+              矩形：拖动测量。线条：两点之间拖动。多边形：点击添加顶点，双击完成。
             </p>
           </div>
 
           <div class="actions">
-            <button id="clear-button" class="ghost" type="button">Clear annotations</button>
-            <button id="save-button" class="primary" type="button">Save to backend</button>
+            <button id="clear-button" class="ghost" type="button">清除标注</button>
+            <button id="download-button" class="ghost" type="button">下载图片</button>
+            <button id="save-button" class="primary" type="button">保存到后端</button>
           </div>
 
           <p id="status-line" class="status-line">
-            Load an image and drag on the canvas to create a measurement box.
+            加载图片并在画布上拖动以创建测量框。
           </p>
         </section>
 
         <section class="panel metrics">
           <div class="metric-card">
-            <span class="metric-label">Annotations</span>
+            <span class="metric-label">标注数量</span>
             <strong id="annotation-count">0</strong>
           </div>
           <div class="metric-card">
-            <span class="metric-label">Selection</span>
-            <strong id="selection-size">None</strong>
+            <span class="metric-label">选中项</span>
+            <strong id="selection-size">无</strong>
           </div>
           <div class="metric-card">
-            <span class="metric-label">Image</span>
-            <strong id="image-size">No file</strong>
+            <span class="metric-label">图片尺寸</span>
+            <strong id="image-size">无文件</strong>
           </div>
         </section>
 
         <section class="panel">
           <div class="panel-heading">
-            <h2>Annotation List</h2>
-            <span id="annotation-hint">Newest first</span>
+            <h2>历史记录</h2>
+            <button id="refresh-history" class="refresh-button" type="button" title="刷新历史">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M1 4v6h6M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>
+              </svg>
+            </button>
+          </div>
+          <ul id="history-list" class="history-list">
+            <li class="empty-state">暂无保存的会话。</li>
+          </ul>
+        </section>
+
+        <section class="panel">
+          <div class="panel-heading">
+            <h2>标注列表</h2>
+            <span id="annotation-hint">最新优先</span>
           </div>
           <ul id="annotation-list" class="annotation-list">
-            <li class="empty-state">No annotations yet.</li>
+            <li class="empty-state">暂无标注。</li>
           </ul>
+
+          <div id="annotation-name-editor" class="annotation-name-editor hidden">
+            <label class="field-label" for="annotation-name-input">标注名称</label>
+            <div style="display: flex; gap: 8px;">
+              <input id="annotation-name-input" type="text" placeholder="输入标注名称..." />
+              <button id="save-annotation-name" type="button">保存</button>
+            </div>
+          </div>
         </section>
       </aside>
 
       <main class="workspace">
         <div class="workspace-header">
           <div>
-            <p class="eyebrow">Canvas Workspace</p>
-            <h2>Image Overlay</h2>
+            <p class="eyebrow">画布工作区</p>
+            <h2>图片标注</h2>
           </div>
           <p class="workspace-note">
-            Prototype scope: image import, rectangle and line measurement, polygon area markup, local save API.
+            支持图片导入、矩形和线条测量、多边形区域标记、本地保存。
           </p>
         </div>
 
         <section class="canvas-panel">
           <canvas id="draft-canvas" aria-label="GeoDraft canvas"></canvas>
           <div id="canvas-overlay" class="canvas-overlay">
-            <strong>Canvas ready.</strong>
-            <span>Load a local image to start measuring.</span>
+            <strong>画布就绪。</strong>
+            <span>加载本地图片开始标注。</span>
           </div>
         </section>
       </main>
