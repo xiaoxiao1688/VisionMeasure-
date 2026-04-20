@@ -23,8 +23,14 @@
   box-sizing: border-box;
 }
 
-body {
+html, body {
   margin: 0;
+  padding: 0;
+  overflow: hidden;
+  height: 100%;
+}
+
+body {
   min-height: 100vh;
   font-family: var(--font-body);
   color: var(--ink);
@@ -34,16 +40,18 @@ body {
 }
 
 button,
-input {
+input,
+textarea {
   font: inherit;
 }
 
 .app-shell {
   display: grid;
   grid-template-columns: 360px minmax(0, 1fr);
-  min-height: 100vh;
+  height: 100vh;
   gap: 24px;
   padding: 24px;
+  overflow: hidden;
 }
 
 .sidebar,
@@ -52,25 +60,27 @@ input {
   border-radius: var(--radius-lg);
   backdrop-filter: blur(14px);
   box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .sidebar {
-  display: flex;
-  flex-direction: column;
   gap: 18px;
   padding: 24px;
   background: linear-gradient(180deg, rgba(255, 250, 241, 0.98), rgba(255, 248, 236, 0.88));
+  overflow-y: auto;
+  flex-shrink: 0;
 }
 
 .workspace {
-  display: flex;
-  flex-direction: column;
   gap: 18px;
   padding: 24px;
   background:
     linear-gradient(180deg, rgba(25, 50, 60, 0.96), rgba(20, 39, 47, 0.94)),
     linear-gradient(135deg, rgba(214, 106, 61, 0.18), transparent 45%);
   color: #f6efe6;
+  min-width: 0;
 }
 
 .eyebrow {
@@ -113,6 +123,7 @@ input {
   border-radius: var(--radius-md);
   background: var(--surface);
   border: 1px solid rgba(25, 50, 60, 0.08);
+  flex-shrink: 0;
 }
 
 .field-label {
@@ -124,13 +135,20 @@ input {
 }
 
 input[type="text"],
-input[type="file"] {
+input[type="file"],
+textarea {
   width: 100%;
   margin-bottom: 14px;
   padding: 12px 14px;
   border-radius: var(--radius-sm);
   border: 1px solid rgba(25, 50, 60, 0.12);
   background: rgba(255, 255, 255, 0.78);
+}
+
+textarea {
+  resize: vertical;
+  min-height: 80px;
+  max-height: 150px;
 }
 
 .file-picker {
@@ -307,7 +325,7 @@ input[type="file"] {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  max-height: 280px;
+  max-height: 200px;
   overflow: auto;
 }
 
@@ -344,12 +362,13 @@ input[type="file"] {
   justify-content: space-between;
   gap: 18px;
   align-items: end;
+  flex-shrink: 0;
 }
 
 .canvas-panel {
   position: relative;
   flex: 1;
-  min-height: 620px;
+  min-height: 0;
   border-radius: var(--radius-lg);
   border: 1px solid rgba(255, 255, 255, 0.08);
   overflow: hidden;
@@ -361,10 +380,10 @@ input[type="file"] {
 }
 
 #draft-canvas {
-  width: 100%;
-  height: 100%;
   display: block;
   cursor: crosshair;
+  max-width: 100%;
+  max-height: 100%;
 }
 
 .canvas-overlay {
@@ -411,7 +430,7 @@ input[type="file"] {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  max-height: 220px;
+  max-height: 200px;
   overflow: auto;
 }
 
@@ -450,104 +469,21 @@ input[type="file"] {
   text-overflow: ellipsis;
 }
 
-.tag-editor {
-  margin-top: 16px;
-  padding-top: 16px;
-  border-top: 1px solid var(--line);
-}
-
-.tag-editor.hidden {
-  display: none;
-}
-
-.tag-input-row {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-
-.tag-input-row input[type="text"] {
-  flex: 1;
-  margin-bottom: 0;
-  padding: 10px 12px;
-  font-size: 0.9rem;
-}
-
-.add-tag-button {
-  appearance: none;
-  border: 0;
-  border-radius: var(--radius-sm);
-  padding: 10px 16px;
-  background: var(--accent);
-  color: white;
-  font-weight: 700;
-  cursor: pointer;
-  transition: transform 140ms ease, background-color 140ms ease;
-  white-space: nowrap;
-}
-
-.add-tag-button:hover {
-  transform: translateY(-1px);
-  background: var(--accent-strong);
-}
-
-.tag-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.tag-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  border-radius: 999px;
-  background: var(--accent-soft);
-  color: var(--accent-strong);
-  font-size: 0.8rem;
-  font-weight: 600;
-}
-
-.tag-remove {
-  appearance: none;
-  border: 0;
-  background: transparent;
-  color: var(--accent-strong);
-  cursor: pointer;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 0.7;
-  transition: opacity 140ms ease, transform 140ms ease;
-  font-size: 14px;
-  line-height: 1;
-}
-
-.tag-remove:hover {
-  opacity: 1;
-  transform: scale(1.1);
-}
-
-.annotation-item .annotation-tags {
-  margin-top: 6px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-
-.annotation-item .annotation-tag {
-  font-size: 0.72rem;
-  padding: 2px 6px;
-  border-radius: 999px;
-  background: rgba(35, 106, 76, 0.12);
-  color: #236a4c;
-}
-
 @media (max-width: 1100px) {
+  html, body {
+    overflow: auto;
+    height: auto;
+  }
+
   .app-shell {
     grid-template-columns: 1fr;
+    height: auto;
+    min-height: 100vh;
+    overflow: auto;
+  }
+
+  .sidebar {
+    overflow: visible;
   }
 
   .metrics {
@@ -561,13 +497,5 @@ input[type="file"] {
 
   .canvas-panel {
     min-height: 420px;
-  }
-
-  .tag-input-row {
-    flex-direction: column;
-  }
-
-  .add-tag-button {
-    width: 100%;
   }
 }
