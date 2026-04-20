@@ -3,6 +3,7 @@ const elements = {
   annotationList: document.querySelector("#annotation-list"),
   canvas: document.querySelector("#draft-canvas"),
   clearButton: document.querySelector("#clear-button"),
+  downloadButton: document.querySelector("#download-button"),
   fileName: document.querySelector("#file-name"),
   historyList: document.querySelector("#history-list"),
   imageLoader: document.querySelector("#image-loader"),
@@ -567,6 +568,30 @@ function exportAnnotatedImage() {
   return tempCanvas.toDataURL("image/png");
 }
 
+function downloadAnnotatedImage() {
+  if (!state.image) {
+    setStatus("下载前请先加载图片。", "error");
+    return;
+  }
+
+  const imageData = exportAnnotatedImage();
+  if (!imageData) {
+    setStatus("无法导出图片。", "error");
+    return;
+  }
+
+  const link = document.createElement("a");
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-").substring(0, 19);
+  const projectName = elements.projectName.value.trim() || "annotation";
+  link.download = `${projectName}-${timestamp}.png`;
+  link.href = imageData;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+
+  setStatus(`图片已下载: ${link.download}`);
+}
+
 async function saveAnnotations() {
   if (!state.image) {
     setStatus("保存前请先加载图片。", "error");
@@ -649,7 +674,9 @@ async function saveAnnotations() {
       throw new Error(body.error || "保存失败。");
     }
 
-    setStatus(`已保存 ${state.annotations.length} 个标注。文件: ${body.filePrefix}`);
+    const savedFiles = body.savedFiles || [];
+    const filesInfo = savedFiles.length > 0 ? `\n保存的文件: ${savedFiles.join(", ")}` : "";
+    setStatus(`已保存 ${state.annotations.length} 个标注到 data/ 目录。前缀: ${body.filePrefix}${filesInfo}`);
     await loadHistoryList();
   } catch (error) {
     setStatus(error.message || "保存失败。", "error");
@@ -948,6 +975,10 @@ elements.clearButton.addEventListener("click", () => {
   renderAnnotationList();
   drawScene();
   setStatus("已清除所有标注。");
+});
+
+elements.downloadButton.addEventListener("click", () => {
+  downloadAnnotatedImage();
 });
 
 elements.saveButton.addEventListener("click", () => {
