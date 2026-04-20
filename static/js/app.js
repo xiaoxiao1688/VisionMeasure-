@@ -1,6 +1,8 @@
 const elements = {
   annotationCount: document.querySelector("#annotation-count"),
   annotationList: document.querySelector("#annotation-list"),
+  annotationNameEditor: document.querySelector("#annotation-name-editor"),
+  annotationNameInput: document.querySelector("#annotation-name-input"),
   canvas: document.querySelector("#draft-canvas"),
   clearButton: document.querySelector("#clear-button"),
   downloadButton: document.querySelector("#download-button"),
@@ -12,6 +14,7 @@ const elements = {
   projectName: document.querySelector("#project-name"),
   projectNotes: document.querySelector("#project-notes"),
   refreshHistory: document.querySelector("#refresh-history"),
+  saveAnnotationName: document.querySelector("#save-annotation-name"),
   saveButton: document.querySelector("#save-button"),
   selectionSize: document.querySelector("#selection-size"),
   statusLine: document.querySelector("#status-line"),
@@ -309,6 +312,7 @@ function normalizeRectangle(start, end) {
   return {
     id: crypto.randomUUID(),
     type: "rectangle",
+    name: "",
     x,
     y,
     width,
@@ -324,6 +328,7 @@ function createLineAnnotation(start, end) {
   return {
     id: crypto.randomUUID(),
     type: "line",
+    name: "",
     start,
     end,
     length: Math.hypot(deltaX, deltaY),
@@ -334,6 +339,7 @@ function createPolygonAnnotation(points) {
   return {
     id: crypto.randomUUID(),
     type: "polygon",
+    name: "",
     points,
     area: getPolygonArea(points),
     perimeter: getPolygonPerimeter(points),
@@ -380,9 +386,11 @@ function getPolygonCentroid(points) {
 }
 
 function getAnnotationSummary(annotation) {
+  const namePrefix = annotation.name ? `${annotation.name} - ` : "";
+
   if (annotation.type === "line") {
     return {
-      title: `线条 ${Math.round(annotation.length)} px`,
+      title: `${namePrefix}线条 ${Math.round(annotation.length)} px`,
       meta: `从 (${Math.round(annotation.start.x)}, ${Math.round(annotation.start.y)}) 到 (${Math.round(annotation.end.x)}, ${Math.round(annotation.end.y)})`,
       selection: `${Math.round(annotation.length)} px`,
     };
@@ -390,14 +398,14 @@ function getAnnotationSummary(annotation) {
 
   if (annotation.type === "polygon") {
     return {
-      title: `多边形 ${Math.round(annotation.area)} px^2`,
+      title: `${namePrefix}多边形 ${Math.round(annotation.area)} px^2`,
       meta: `${annotation.points.length} 个顶点, 周长 ${Math.round(annotation.perimeter)} px`,
       selection: `${Math.round(annotation.area)} px^2`,
     };
   }
 
   return {
-    title: `${Math.round(annotation.width)} x ${Math.round(annotation.height)} px`,
+    title: `${namePrefix}${Math.round(annotation.width)} x ${Math.round(annotation.height)} px`,
     meta: `面积 ${Math.round(annotation.area)} px^2, 原点 (${Math.round(annotation.x)}, ${Math.round(annotation.y)})`,
     selection: `${Math.round(annotation.width)} x ${Math.round(annotation.height)}`,
   };
@@ -480,6 +488,44 @@ function selectAnnotation(id) {
   state.selectedId = id;
   renderAnnotationList();
   drawScene();
+  updateAnnotationNameEditor();
+}
+
+function updateAnnotationNameEditor() {
+  if (!state.selectedId) {
+    elements.annotationNameEditor.classList.add("hidden");
+    elements.annotationNameInput.value = "";
+    return;
+  }
+
+  const annotation = state.annotations.find((a) => a.id === state.selectedId);
+  if (!annotation) {
+    elements.annotationNameEditor.classList.add("hidden");
+    elements.annotationNameInput.value = "";
+    return;
+  }
+
+  elements.annotationNameEditor.classList.remove("hidden");
+  elements.annotationNameInput.value = annotation.name || "";
+}
+
+function saveAnnotationName() {
+  if (!state.selectedId) {
+    setStatus("请先选择一个标注。", "error");
+    return;
+  }
+
+  const annotation = state.annotations.find((a) => a.id === state.selectedId);
+  if (!annotation) {
+    setStatus("未找到选中的标注。", "error");
+    return;
+  }
+
+  const name = elements.annotationNameInput.value.trim();
+  annotation.name = name;
+
+  renderAnnotationList();
+  setStatus(name ? `标注名称已更新: "${name}"` : "已清除标注名称。");
 }
 
 function loadImage(file) {
@@ -628,6 +674,7 @@ async function saveAnnotations() {
     annotations: state.annotations.map((annotation) => ({
       id: annotation.id,
       type: annotation.type,
+      name: annotation.name || "",
       x: annotation.x !== undefined ? Number(annotation.x.toFixed(2)) : undefined,
       y: annotation.y !== undefined ? Number(annotation.y.toFixed(2)) : undefined,
       width: annotation.width !== undefined ? Number(annotation.width.toFixed(2)) : undefined,
@@ -974,11 +1021,23 @@ elements.clearButton.addEventListener("click", () => {
   resetDraftState();
   renderAnnotationList();
   drawScene();
+  updateAnnotationNameEditor();
   setStatus("已清除所有标注。");
 });
 
 elements.downloadButton.addEventListener("click", () => {
   downloadAnnotatedImage();
+});
+
+elements.saveAnnotationName.addEventListener("click", () => {
+  saveAnnotationName();
+});
+
+elements.annotationNameInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    saveAnnotationName();
+  }
 });
 
 elements.saveButton.addEventListener("click", () => {
