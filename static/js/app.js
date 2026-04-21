@@ -725,6 +725,7 @@ function saveAnnotationName() {
 function resetSessionStateForNewImage() {
   state.annotations = [];
   state.selectedId = null;
+  state.undoStack = [];
   resetDraftState();
   renderAnnotationList();
   updateAnnotationNameEditor();
@@ -1086,6 +1087,7 @@ async function loadSession(filePrefix) {
     state.currentSessionPrefix = filePrefix;
     state.annotations = Array.isArray(body.annotations) ? body.annotations : [];
     state.selectedId = null;
+    state.undoStack = [];
     resetDraftState();
     renderAnnotationList();
     updateAnnotationNameEditor();
@@ -1226,15 +1228,23 @@ function finalizeLine() {
 }
 
 function undoLastAction() {
+  console.log("[撤销] 撤销按钮被点击，撤销栈长度:", state.undoStack.length);
+  console.log("[撤销] 撤销栈内容:", JSON.stringify(state.undoStack, null, 2));
+  console.log("[撤销] 当前标注数量:", state.annotations.length);
+  console.log("[撤销] 当前标注 IDs:", state.annotations.map(a => a.id));
+
   if (state.undoStack.length === 0) {
     setStatus("没有可撤销的操作。请先添加一些标注。", "error");
     return;
   }
 
   const lastAction = state.undoStack.pop();
+  console.log("[撤销] 弹出的操作:", JSON.stringify(lastAction, null, 2));
 
   if (lastAction.action === "add") {
     const index = state.annotations.findIndex((a) => a.id === lastAction.annotation.id);
+    console.log("[撤销] 找到的标注索引:", index);
+
     if (index !== -1) {
       state.annotations.splice(index, 1);
       state.selectedId = null;
@@ -1242,8 +1252,10 @@ function undoLastAction() {
       updateAnnotationNameEditor();
       drawScene();
       setStatus(`已撤销：${lastAction.annotation.type} 标注。`);
+      console.log("[撤销] 撤销成功！");
     } else {
       setStatus("无法找到要撤销的标注。", "error");
+      console.log("[撤销] 撤销失败：无法找到标注 ID", lastAction.annotation.id);
     }
   }
 }
@@ -1557,9 +1569,15 @@ elements.historyList.addEventListener("click", (event) => {
   loadSession(item.dataset.filename);
 });
 
-elements.undoButton.addEventListener("click", () => {
-  undoLastAction();
-});
+console.log("[初始化] elements.undoButton:", elements.undoButton);
+if (elements.undoButton) {
+  elements.undoButton.addEventListener("click", () => {
+    console.log("[撤销按钮] 点击事件触发");
+    undoLastAction();
+  });
+} else {
+  console.error("[初始化] 无法找到撤销按钮元素！");
+}
 
 elements.clearButton.addEventListener("click", () => {
   state.annotations = [];
