@@ -90,7 +90,7 @@ const state = {
   editHandleIndex: null,
   editOriginalAnnotation: null,
   editStartPoint: null,
-  displayMode: "fit",
+  displayMode: "actual",
 };
 
 const ctx = elements.canvas.getContext("2d");
@@ -192,10 +192,11 @@ function computeImagePlacement() {
   }
 
   const padding = 36;
+  const dpr = getDevicePixelRatio();
   let scale;
 
   if (state.displayMode === "actual") {
-    scale = 1;
+    scale = 1 / dpr;
   } else {
     const availableWidth = canvasCssWidth - padding * 2;
     const availableHeight = canvasCssHeight - padding * 2;
@@ -251,10 +252,8 @@ function drawScene() {
   const placement = state.imagePlacement;
 
   ctx.save();
-  ctx.shadowColor = "rgba(0, 0, 0, 0.15)";
-  ctx.shadowBlur = 6;
-  ctx.shadowOffsetX = 0;
-  ctx.shadowOffsetY = 2;
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
   ctx.drawImage(state.image, placement.x, placement.y, placement.width, placement.height);
   ctx.restore();
 
