@@ -1563,6 +1563,7 @@ elements.canvas.addEventListener("pointerdown", (event) => {
       const hitHandle = findHitHandle(point, selectedAnnotation);
       
       if (hitHandle) {
+        elements.canvas.setPointerCapture(event.pointerId);
         if (hitHandle.type === "corner" && selectedAnnotation.type === "rectangle") {
           startEditing(selectedAnnotation, "resize", hitHandle.index);
           state.editStartPoint = { ...point };
@@ -1580,6 +1581,7 @@ elements.canvas.addEventListener("pointerdown", (event) => {
         (selectedAnnotation.type === "polygon" && isPointInPolygon(point, selectedAnnotation.points)) ||
         (selectedAnnotation.type === "line" && isPointNearPolyline(point, selectedAnnotation.points, 6))
       ) {
+        elements.canvas.setPointerCapture(event.pointerId);
         startEditing(selectedAnnotation, "move");
         state.editStartPoint = { ...point };
         setStatus("拖动整体移动标注位置。");
@@ -1591,7 +1593,10 @@ elements.canvas.addEventListener("pointerdown", (event) => {
   const hitAnnotation = findHitAnnotation(point);
   if (hitAnnotation) {
     selectAnnotation(hitAnnotation.id);
-    setStatus(`已选中${hitAnnotation.type === "rectangle" ? "矩形" : hitAnnotation.type === "polygon" ? "多边形" : hitAnnotation.type === "line" ? "折线" : "画笔"}标注。`);
+    elements.canvas.setPointerCapture(event.pointerId);
+    startEditing(hitAnnotation, "move");
+    state.editStartPoint = { ...point };
+    setStatus(`已选中并开始移动${hitAnnotation.type === "rectangle" ? "矩形" : hitAnnotation.type === "polygon" ? "多边形" : hitAnnotation.type === "line" ? "折线" : "画笔"}标注。`);
     return;
   }
 
@@ -1633,17 +1638,21 @@ elements.canvas.addEventListener("pointermove", (event) => {
   if (state.editing && state.editOriginalAnnotation) {
     const annotation = state.annotations.find((a) => a.id === state.editOriginalAnnotation.id);
     if (annotation && state.editStartPoint) {
+      if (!point) {
+        return;
+      }
+
       const dx = point.x - state.editStartPoint.x;
       const dy = point.y - state.editStartPoint.y;
       
       if (state.editMode === "move") {
         if (annotation.type === "rectangle") {
-          annotation.x += dx;
-          annotation.y += dy;
+          annotation.x = state.editOriginalAnnotation.x + dx;
+          annotation.y = state.editOriginalAnnotation.y + dy;
         } else if (annotation.points) {
           for (let index = 0; index < annotation.points.length; index += 1) {
-            annotation.points[index].x += dx;
-            annotation.points[index].y += dy;
+            annotation.points[index].x = state.editOriginalAnnotation.points[index].x + dx;
+            annotation.points[index].y = state.editOriginalAnnotation.points[index].y + dy;
           }
         }
       } else if (state.editMode === "resize" && annotation.type === "rectangle") {
@@ -1676,7 +1685,6 @@ elements.canvas.addEventListener("pointermove", (event) => {
         }
       }
       
-      state.editStartPoint = { ...point };
       updateAnnotationMetrics(annotation);
       renderAnnotationList();
       drawScene();
