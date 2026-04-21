@@ -1220,7 +1220,7 @@ function finalizeLine() {
 
 function undoLastAction() {
   if (state.undoStack.length === 0) {
-    setStatus("没有可撤销的操作。", "error");
+    setStatus("没有可撤销的操作。请先添加一些标注。", "error");
     return;
   }
 
@@ -1234,7 +1234,9 @@ function undoLastAction() {
       renderAnnotationList();
       updateAnnotationNameEditor();
       drawScene();
-      setStatus("已撤销上一个操作。");
+      setStatus(`已撤销：${lastAction.annotation.type} 标注。`);
+    } else {
+      setStatus("无法找到要撤销的标注。", "error");
     }
   }
 }
