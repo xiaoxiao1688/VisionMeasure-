@@ -42,6 +42,7 @@ const elements = {
   annotationNameInput: document.querySelector("#annotation-name-input"),
   canvas: document.querySelector("#draft-canvas"),
   clearButton: document.querySelector("#clear-button"),
+  deleteSelectedButton: document.querySelector("#delete-selected-button"),
   downloadButton: document.querySelector("#download-button"),
   exportFilename: document.querySelector("#export-filename"),
   fileName: document.querySelector("#file-name"),
@@ -83,6 +84,11 @@ const state = {
   selectedId: null,
   sessions: [],
   undoStack: [],
+  editing: false,
+  editMode: null,
+  editHandleIndex: null,
+  editOriginalAnnotation: null,
+  editStartPoint: null,
 };
 
 const ctx = elements.canvas.getContext("2d");
@@ -289,6 +295,14 @@ function drawRectangleAnnotation(annotation, isDraft) {
   ctx.fillStyle = isDraft ? "rgba(255, 143, 98, 0.12)" : "rgba(255, 143, 98, 0.18)";
   ctx.strokeRect(x, y, width, height);
   ctx.fillRect(x, y, width, height);
+  
+  if (selected) {
+    drawVertex(x, y, true);
+    drawVertex(x + width, y, true);
+    drawVertex(x + width, y + height, true);
+    drawVertex(x, y + height, true);
+  }
+  
   drawLabel(x, Math.max(placement.y, y - 28), getAnnotationLabel(annotation));
   ctx.restore();
 }
@@ -643,6 +657,22 @@ function pushUndoAdd(annotation) {
   });
 }
 
+function pushUndoModify(originalAnnotation, modifiedAnnotation) {
+  state.undoStack.push({
+    action: "modify",
+    original: structuredClone(originalAnnotation),
+    modified: structuredClone(modifiedAnnotation),
+  });
+}
+
+function pushUndoDelete(annotation) {
+  state.undoStack.push({
+    action: "delete",
+    annotation: structuredClone(annotation),
+    index: state.annotations.findIndex((a) => a.id === annotation.id),
+  });
+}
+
 function resetDraftState() {
   state.drawing = false;
   state.pointerStart = null;
@@ -650,6 +680,179 @@ function resetDraftState() {
   state.polygonPoints = [];
   state.linePoints = [];
   state.brushPoints = [];
+}
+
+function resetEditState() {
+  state.editing = false;
+  state.editMode = null;
+  state.editHandleIndex = null;
+  state.editOriginalAnnotation = null;
+  state.editStartPoint = null;
+}
+
+function getRectangleCorners(annotation) {
+  return [
+    { x: annotation.x, y: annotation.y },
+    { x: annotation.x + annotation.width, y: annotation.y },
+    { x: annotation.x + annotation.width, y: annotation.y + annotation.height },
+    { x: annotation.x, y: annotation.y + annotation.height },
+  ];
+}
+
+function isPointInRectangle(point, annotation) {
+  return (
+    point.x >= annotation.x &&
+    point.x <= annotation.x + annotation.width &&
+    point.y >= annotation.y &&
+    point.y <= annotation.y + annotation.height
+  );
+}
+
+function isPointNearVertex(point, vertex, threshold = 8) {
+  return Math.hypot(point.x - vertex.x, point.y - vertex.y) <= threshold;
+}
+
+function findHitAnnotation(point) {
+  for (let index = state.annotations.length - 1; index >= 0; index -= 1) {
+    const annotation = state.annotations[index];
+    
+    if (annotation.type === "rectangle") {
+      if (isPointInRectangle(point, annotation)) {
+        return annotation;
+      }
+    } else if (annotation.type === "polygon") {
+      if (isPointInPolygon(point, annotation.points)) {
+        return annotation;
+      }
+    } else if (annotation.type === "line" || annotation.type === "brush") {
+      if (isPointNearPolyline(point, annotation.points, 6)) {
+        return annotation;
+      }
+    }
+  }
+  return null;
+}
+
+function isPointInPolygon(point, vertices) {
+  let inside = false;
+  for (let i = 0, j = vertices.length - 1; i < vertices.length; j = i++) {
+    const xi = vertices[i].x, yi = vertices[i].y;
+    const xj = vertices[j].x, yj = vertices[j].y;
+    
+    const intersect = ((yi > point.y) !== (yj > point.y)) &&
+        (point.x < (xj - xi) * (point.y - yi) / (yj - yi) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+function isPointNearPolyline(point, points, threshold) {
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const distance = pointToSegmentDistance(point, points[index], points[index + 1]);
+    if (distance <= threshold) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function pointToSegmentDistance(point, segmentStart, segmentEnd) {
+  const dx = segmentEnd.x - segmentStart.x;
+  const dy = segmentEnd.y - segmentStart.y;
+  const lengthSquared = dx * dx + dy * dy;
+  
+  if (lengthSquared === 0) {
+    return Math.hypot(point.x - segmentStart.x, point.y - segmentStart.y);
+  }
+  
+  let t = ((point.x - segmentStart.x) * dx + (point.y - segmentStart.y) * dy) / lengthSquared;
+  t = Math.max(0, Math.min(1, t));
+  
+  const projectionX = segmentStart.x + t * dx;
+  const projectionY = segmentStart.y + t * dy;
+  
+  return Math.hypot(point.x - projectionX, point.y - projectionY);
+}
+
+function findHitHandle(point, annotation) {
+  if (!annotation) return null;
+  
+  if (annotation.type === "rectangle") {
+    const corners = getRectangleCorners(annotation);
+    for (let index = 0; index < corners.length; index += 1) {
+      if (isPointNearVertex(point, corners[index], 8)) {
+        return { type: "corner", index };
+      }
+    }
+  } else if (annotation.type === "polygon" || annotation.type === "line") {
+    for (let index = 0; index < annotation.points.length; index += 1) {
+      if (isPointNearVertex(point, annotation.points[index], 8)) {
+        return { type: "vertex", index };
+      }
+    }
+  }
+  
+  return null;
+}
+
+function updateAnnotationMetrics(annotation) {
+  if (annotation.type === "rectangle") {
+    annotation.area = annotation.width * annotation.height;
+  } else if (annotation.type === "line" || annotation.type === "brush") {
+    annotation.length = getPolylineLength(annotation.points);
+  } else if (annotation.type === "polygon") {
+    annotation.area = getPolygonArea(annotation.points);
+    annotation.perimeter = getPolygonPerimeter(annotation.points);
+  }
+}
+
+function startEditing(annotation, editMode, handleIndex = null) {
+  if (!annotation) return;
+  
+  state.editing = true;
+  state.editMode = editMode;
+  state.editHandleIndex = handleIndex;
+  state.editOriginalAnnotation = structuredClone(annotation);
+}
+
+function finishEditing() {
+  if (!state.editing || !state.editOriginalAnnotation) {
+    resetEditState();
+    return;
+  }
+  
+  const annotation = state.annotations.find((a) => a.id === state.editOriginalAnnotation.id);
+  if (annotation) {
+    updateAnnotationMetrics(annotation);
+    pushUndoModify(state.editOriginalAnnotation, annotation);
+    renderAnnotationList();
+    drawScene();
+    setStatus("已完成编辑，可按 Ctrl+Z 撤销。");
+  }
+  
+  resetEditState();
+}
+
+function deleteSelectedAnnotation() {
+  if (!state.selectedId) {
+    setStatus("请先选择一个标注。", "error");
+    return;
+  }
+  
+  const annotation = state.annotations.find((a) => a.id === state.selectedId);
+  if (!annotation) {
+    setStatus("没有找到当前选中的标注。", "error");
+    return;
+  }
+  
+  pushUndoDelete(annotation);
+  state.annotations = state.annotations.filter((a) => a.id !== state.selectedId);
+  state.selectedId = null;
+  resetEditState();
+  renderAnnotationList();
+  updateAnnotationNameEditor();
+  drawScene();
+  setStatus("已删除选中的标注。");
 }
 
 function refreshOverlay() {
@@ -1304,6 +1507,25 @@ function undoLastAction() {
     updateAnnotationNameEditor();
     drawScene();
     setStatus("已撤销上一步新增标注。");
+  } else if (lastAction.action === "modify") {
+    const annotationIndex = state.annotations.findIndex((a) => a.id === lastAction.original.id);
+    if (annotationIndex !== -1) {
+      state.annotations[annotationIndex] = structuredClone(lastAction.original);
+      renderAnnotationList();
+      updateAnnotationNameEditor();
+      drawScene();
+      setStatus("已撤销上一步修改操作。");
+    }
+  } else if (lastAction.action === "delete") {
+    const insertIndex = lastAction.index >= 0 ? lastAction.index : state.annotations.length;
+    state.annotations.splice(insertIndex, 0, structuredClone(lastAction.annotation));
+    if (state.selectedId === null) {
+      state.selectedId = lastAction.annotation.id;
+    }
+    renderAnnotationList();
+    updateAnnotationNameEditor();
+    drawScene();
+    setStatus("已撤销上一步删除操作。");
   }
 }
 
@@ -1332,6 +1554,44 @@ elements.canvas.addEventListener("pointerdown", (event) => {
 
   const point = pointerToImageCoordinates(event);
   if (!point) {
+    return;
+  }
+
+  if (state.selectedId) {
+    const selectedAnnotation = state.annotations.find((a) => a.id === state.selectedId);
+    if (selectedAnnotation) {
+      const hitHandle = findHitHandle(point, selectedAnnotation);
+      
+      if (hitHandle) {
+        if (hitHandle.type === "corner" && selectedAnnotation.type === "rectangle") {
+          startEditing(selectedAnnotation, "resize", hitHandle.index);
+          state.editStartPoint = { ...point };
+          setStatus("拖动角点调整矩形大小。");
+        } else if (hitHandle.type === "vertex" && (selectedAnnotation.type === "polygon" || selectedAnnotation.type === "line")) {
+          startEditing(selectedAnnotation, "vertex", hitHandle.index);
+          state.editStartPoint = { ...point };
+          setStatus("拖动顶点调整位置。");
+        }
+        return;
+      }
+      
+      if (
+        (selectedAnnotation.type === "rectangle" && isPointInRectangle(point, selectedAnnotation)) ||
+        (selectedAnnotation.type === "polygon" && isPointInPolygon(point, selectedAnnotation.points)) ||
+        (selectedAnnotation.type === "line" && isPointNearPolyline(point, selectedAnnotation.points, 6))
+      ) {
+        startEditing(selectedAnnotation, "move");
+        state.editStartPoint = { ...point };
+        setStatus("拖动整体移动标注位置。");
+        return;
+      }
+    }
+  }
+
+  const hitAnnotation = findHitAnnotation(point);
+  if (hitAnnotation) {
+    selectAnnotation(hitAnnotation.id);
+    setStatus(`已选中${hitAnnotation.type === "rectangle" ? "矩形" : hitAnnotation.type === "polygon" ? "多边形" : hitAnnotation.type === "line" ? "折线" : "画笔"}标注。`);
     return;
   }
 
@@ -1370,6 +1630,60 @@ elements.canvas.addEventListener("pointerdown", (event) => {
 elements.canvas.addEventListener("pointermove", (event) => {
   const point = pointerToImageCoordinates(event);
 
+  if (state.editing && state.editOriginalAnnotation) {
+    const annotation = state.annotations.find((a) => a.id === state.editOriginalAnnotation.id);
+    if (annotation && state.editStartPoint) {
+      const dx = point.x - state.editStartPoint.x;
+      const dy = point.y - state.editStartPoint.y;
+      
+      if (state.editMode === "move") {
+        if (annotation.type === "rectangle") {
+          annotation.x += dx;
+          annotation.y += dy;
+        } else if (annotation.points) {
+          for (let index = 0; index < annotation.points.length; index += 1) {
+            annotation.points[index].x += dx;
+            annotation.points[index].y += dy;
+          }
+        }
+      } else if (state.editMode === "resize" && annotation.type === "rectangle") {
+        const corners = getRectangleCorners(state.editOriginalAnnotation);
+        const draggedCorner = corners[state.editHandleIndex];
+        const oppositeIndex = (state.editHandleIndex + 2) % 4;
+        const oppositeCorner = corners[oppositeIndex];
+        
+        const newCorner = {
+          x: draggedCorner.x + dx,
+          y: draggedCorner.y + dy,
+        };
+        
+        const newX = Math.min(newCorner.x, oppositeCorner.x);
+        const newY = Math.min(newCorner.y, oppositeCorner.y);
+        const newWidth = Math.abs(newCorner.x - oppositeCorner.x);
+        const newHeight = Math.abs(newCorner.y - oppositeCorner.y);
+        
+        if (newWidth >= 2 && newHeight >= 2) {
+          annotation.x = newX;
+          annotation.y = newY;
+          annotation.width = newWidth;
+          annotation.height = newHeight;
+        }
+      } else if (state.editMode === "vertex" && annotation.points) {
+        const vertexIndex = state.editHandleIndex;
+        if (vertexIndex >= 0 && vertexIndex < annotation.points.length) {
+          annotation.points[vertexIndex].x = state.editOriginalAnnotation.points[vertexIndex].x + dx;
+          annotation.points[vertexIndex].y = state.editOriginalAnnotation.points[vertexIndex].y + dy;
+        }
+      }
+      
+      state.editStartPoint = { ...point };
+      updateAnnotationMetrics(annotation);
+      renderAnnotationList();
+      drawScene();
+    }
+    return;
+  }
+
   if (state.currentTool === "polygon") {
     state.draftAnnotation =
       state.polygonPoints.length && point ? { type: "polygon-preview", previewPoint: point } : null;
@@ -1403,6 +1717,11 @@ elements.canvas.addEventListener("pointermove", (event) => {
 });
 
 elements.canvas.addEventListener("pointerup", (event) => {
+  if (state.editing) {
+    finishEditing();
+    return;
+  }
+
   if (state.currentTool === "polygon" || state.currentTool === "line") {
     return;
   }
@@ -1451,6 +1770,11 @@ elements.canvas.addEventListener("pointerup", (event) => {
 });
 
 elements.canvas.addEventListener("pointerleave", () => {
+  if (state.editing) {
+    finishEditing();
+    return;
+  }
+
   if (state.currentTool === "polygon" || state.currentTool === "line") {
     state.draftAnnotation = null;
     drawScene();
@@ -1556,6 +1880,10 @@ elements.historyList.addEventListener("click", (event) => {
 
 elements.undoButton.addEventListener("click", () => {
   undoLastAction();
+});
+
+elements.deleteSelectedButton.addEventListener("click", () => {
+  deleteSelectedAnnotation();
 });
 
 elements.clearButton.addEventListener("click", () => {
