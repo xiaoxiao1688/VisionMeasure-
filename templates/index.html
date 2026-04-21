@@ -38,11 +38,18 @@
               <button data-tool="rectangle" class="tool-button active" type="button">矩形</button>
               <button data-tool="line" class="tool-button" type="button">线段</button>
               <button data-tool="polygon" class="tool-button" type="button">多边形</button>
+              <button data-tool="brush" class="tool-button" type="button">画笔</button>
             </div>
             <p class="tool-help">
-              矩形用来框选区域，线段用来测距离，多边形适合不规则区域，双击可完成闭合。
+              矩形用来框选区域，线段用来测距离，多边形适合不规则区域，双击可完成闭合，画笔可以自由绘制。
             </p>
           </div>
+
+          <label class="field-label" for="export-filename">导出文件名</label>
+          <input id="export-filename" type="text" placeholder="自定义导出图片名称（可选）" />
+
+          <label class="field-label" for="image-tags">图片标签</label>
+          <input id="image-tags" type="text" placeholder="用逗号分隔多个标签，如：建筑,风景,测量" />
 
           <div class="actions">
             <button id="clear-button" class="ghost" type="button">

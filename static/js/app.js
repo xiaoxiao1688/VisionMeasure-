@@ -6,10 +6,12 @@ const elements = {
   canvas: document.querySelector("#draft-canvas"),
   clearButton: document.querySelector("#clear-button"),
   downloadButton: document.querySelector("#download-button"),
+  exportFilename: document.querySelector("#export-filename"),
   fileName: document.querySelector("#file-name"),
   historyList: document.querySelector("#history-list"),
   imageLoader: document.querySelector("#image-loader"),
   imageSize: document.querySelector("#image-size"),
+  imageTags: document.querySelector("#image-tags"),
   overlay: document.querySelector("#canvas-overlay"),
   projectName: document.querySelector("#project-name"),
   projectNotes: document.querySelector("#project-notes"),
@@ -35,6 +37,7 @@ const state = {
   polygonPoints: [],
   selectedId: null,
   sessions: [],
+  brushPoints: [],
 };
 
 const ctx = elements.canvas.getContext("2d");
@@ -54,6 +57,10 @@ function getToolInstructions(tool = state.currentTool) {
 
   if (tool === "polygon") {
     return "多边形工具已启用，点击添加顶点，双击或按 Enter 完成闭合。";
+  }
+
+  if (tool === "brush") {
+    return "画笔工具已启用，在图片上拖动即可自由绘制。";
   }
 
   return "矩形工具已启用，在图片上拖动即可创建测量框。";
@@ -125,6 +132,10 @@ function drawScene() {
   if (state.currentTool === "polygon" && state.polygonPoints.length) {
     drawPolygonDraft();
   }
+
+  if (state.currentTool === "brush" && state.brushPoints.length) {
+    drawBrushDraft();
+  }
 }
 
 function drawEmptyCanvas() {
@@ -150,6 +161,11 @@ function drawAnnotation(annotation, isDraft = false) {
 
   if (annotation.type === "polygon") {
     drawPolygonAnnotation(annotation, isDraft);
+    return;
+  }
+
+  if (annotation.type === "brush") {
+    drawBrushAnnotation(annotation, isDraft);
     return;
   }
 
@@ -258,6 +274,62 @@ function drawPolygonDraft() {
   ctx.restore();
 }
 
+function drawBrushAnnotation(annotation, isDraft) {
+  const placement = state.imagePlacement;
+  const selected = annotation.id === state.selectedId;
+
+  if (!annotation.points?.length) {
+    return;
+  }
+
+  const points = annotation.points.map((point) => ({
+    x: placement.x + point.x * placement.scale,
+    y: placement.y + point.y * placement.scale,
+  }));
+
+  ctx.save();
+  ctx.lineWidth = selected ? 4 : 3;
+  ctx.strokeStyle = selected ? "#ffd18a" : "#ff6b9d";
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  for (let index = 1; index < points.length; index += 1) {
+    ctx.lineTo(points[index].x, points[index].y);
+  }
+  ctx.stroke();
+
+  const centroid = getPolygonCentroid(points);
+  drawLabel(centroid.x - 36, centroid.y - 14, getAnnotationLabel(annotation));
+  ctx.restore();
+}
+
+function drawBrushDraft() {
+  const placement = state.imagePlacement;
+
+  if (!state.brushPoints.length) {
+    return;
+  }
+
+  const points = state.brushPoints.map((point) => ({
+    x: placement.x + point.x * placement.scale,
+    y: placement.y + point.y * placement.scale,
+  }));
+
+  ctx.save();
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = "#ff6b9d";
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  for (let index = 1; index < points.length; index += 1) {
+    ctx.lineTo(points[index].x, points[index].y);
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
 function drawVertex(x, y, selected) {
   ctx.save();
   ctx.beginPath();
@@ -344,6 +416,26 @@ function createPolygonAnnotation(points) {
   };
 }
 
+function createBrushAnnotation(points) {
+  return {
+    id: crypto.randomUUID(),
+    type: "brush",
+    name: "",
+    points,
+    length: getBrushLength(points),
+  };
+}
+
+function getBrushLength(points) {
+  let length = 0;
+  for (let index = 1; index < points.length; index += 1) {
+    const current = points[index];
+    const previous = points[index - 1];
+    length += Math.hypot(current.x - previous.x, current.y - previous.y);
+  }
+  return length;
+}
+
 function getPolygonArea(points) {
   let area = 0;
 
@@ -394,6 +486,10 @@ function getAnnotationLabel(annotation) {
     return `${prefix}${Math.round(annotation.area)} px²`;
   }
 
+  if (annotation.type === "brush") {
+    return `${prefix}画笔 ${Math.round(annotation.length)} px`;
+  }
+
   return `${prefix}${Math.round(annotation.width)} × ${Math.round(annotation.height)} px`;
 }
 
@@ -416,6 +512,14 @@ function getAnnotationSummary(annotation) {
     };
   }
 
+  if (annotation.type === "brush") {
+    return {
+      title: `${prefix}画笔 ${Math.round(annotation.length)} px`,
+      meta: `${annotation.points.length} 个点，总长度 ${Math.round(annotation.length)} px`,
+      selection: `${Math.round(annotation.length)} px`,
+    };
+  }
+
   return {
     title: `${prefix}${Math.round(annotation.width)} × ${Math.round(annotation.height)} px`,
     meta: `面积 ${Math.round(annotation.area)} px²，起点 (${Math.round(annotation.x)}, ${Math.round(annotation.y)})`,
@@ -434,6 +538,7 @@ function resetDraftState() {
   state.pointerStart = null;
   state.draftAnnotation = null;
   state.polygonPoints = [];
+  state.brushPoints = [];
 }
 
 function refreshOverlay() {
@@ -639,6 +744,24 @@ function exportAnnotatedImage() {
       return;
     }
 
+    if (annotation.type === "brush") {
+      if (!annotation.points?.length) {
+        return;
+      }
+
+      tempCtx.lineWidth = 3;
+      tempCtx.strokeStyle = "#ff6b9d";
+      tempCtx.lineCap = "round";
+      tempCtx.lineJoin = "round";
+      tempCtx.beginPath();
+      tempCtx.moveTo(annotation.points[0].x, annotation.points[0].y);
+      for (let index = 1; index < annotation.points.length; index += 1) {
+        tempCtx.lineTo(annotation.points[index].x, annotation.points[index].y);
+      }
+      tempCtx.stroke();
+      return;
+    }
+
     if (!annotation.points?.length) {
       return;
     }
@@ -672,9 +795,17 @@ function downloadAnnotatedImage() {
   }
 
   const link = document.createElement("a");
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-  const projectName = elements.projectName.value.trim() || "geodraft";
-  link.download = `${projectName}-${timestamp}.png`;
+  const customFilename = elements.exportFilename.value.trim();
+
+  if (customFilename) {
+    const safeFilename = customFilename.replace(/[<>:"/\\|?*]/g, "_");
+    link.download = safeFilename.endsWith(".png") ? safeFilename : `${safeFilename}.png`;
+  } else {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const projectName = elements.projectName.value.trim() || "geodraft";
+    link.download = `${projectName}-${timestamp}.png`;
+  }
+
   link.href = imageData;
   document.body.appendChild(link);
   link.click();
@@ -747,9 +878,19 @@ async function saveAnnotations() {
     console.warn("Failed to read original image:", error);
   }
 
+  const tagsInput = elements.imageTags.value.trim();
+  const tags = tagsInput
+    ? tagsInput
+        .split(",")
+        .map((tag) => tag.trim())
+        .filter((tag) => tag)
+    : [];
+
   const payload = {
     projectName: elements.projectName.value.trim() || "GeoDraft Prototype",
     projectNotes: elements.projectNotes.value.trim(),
+    imageTags: tags,
+    exportFilename: elements.exportFilename.value.trim(),
     imageMeta: {
       name: state.imageName,
       width: state.image.width,
@@ -859,6 +1000,8 @@ async function loadSession(filePrefix) {
 
     elements.projectName.value = body.projectName || "GeoDraft Prototype";
     elements.projectNotes.value = body.projectNotes || "";
+    elements.exportFilename.value = body.exportFilename || "";
+    elements.imageTags.value = (body.imageTags || []).join(", ");
     state.currentSessionPrefix = filePrefix;
     state.annotations = Array.isArray(body.annotations) ? body.annotations : [];
     state.selectedId = null;
@@ -989,6 +1132,14 @@ elements.canvas.addEventListener("pointerdown", (event) => {
     return;
   }
 
+  if (state.currentTool === "brush") {
+    state.drawing = true;
+    state.brushPoints = [point];
+    drawScene();
+    setStatus("画笔绘制中...");
+    return;
+  }
+
   state.drawing = true;
   state.pointerStart = point;
   state.draftAnnotation =
@@ -1002,6 +1153,19 @@ elements.canvas.addEventListener("pointermove", (event) => {
     state.draftAnnotation =
       state.polygonPoints.length && point ? { type: "polygon-preview", previewPoint: point } : null;
     drawScene();
+    return;
+  }
+
+  if (state.currentTool === "brush") {
+    if (!state.drawing) {
+      return;
+    }
+
+    const point = pointerToImageCoordinates(event);
+    if (point) {
+      state.brushPoints.push(point);
+      drawScene();
+    }
     return;
   }
 
@@ -1023,6 +1187,38 @@ elements.canvas.addEventListener("pointermove", (event) => {
 
 elements.canvas.addEventListener("pointerup", (event) => {
   if (state.currentTool === "polygon") {
+    return;
+  }
+
+  if (state.currentTool === "brush") {
+    if (!state.drawing) {
+      return;
+    }
+
+    state.drawing = false;
+
+    if (state.brushPoints.length < 2) {
+      state.brushPoints = [];
+      drawScene();
+      setStatus("画笔路径太短，已忽略。", "error");
+      return;
+    }
+
+    const annotation = createBrushAnnotation([...state.brushPoints]);
+    state.brushPoints = [];
+
+    if (annotation.length < 4) {
+      setStatus("画笔路径太短，已忽略。", "error");
+      drawScene();
+      return;
+    }
+
+    state.annotations.push(annotation);
+    state.selectedId = annotation.id;
+    renderAnnotationList();
+    updateAnnotationNameEditor();
+    drawScene();
+    setStatus(`已添加画笔，长度 ${Math.round(annotation.length)} px。`);
     return;
   }
 
@@ -1074,6 +1270,33 @@ elements.canvas.addEventListener("pointerup", (event) => {
 elements.canvas.addEventListener("pointerleave", () => {
   if (state.currentTool === "polygon") {
     state.draftAnnotation = null;
+    drawScene();
+    return;
+  }
+
+  if (state.currentTool === "brush") {
+    if (!state.drawing) {
+      return;
+    }
+
+    state.drawing = false;
+
+    if (state.brushPoints.length >= 2) {
+      const annotation = createBrushAnnotation([...state.brushPoints]);
+      state.brushPoints = [];
+
+      if (annotation.length >= 4) {
+        state.annotations.push(annotation);
+        state.selectedId = annotation.id;
+        renderAnnotationList();
+        updateAnnotationNameEditor();
+        drawScene();
+        setStatus(`已添加画笔，长度 ${Math.round(annotation.length)} px。`);
+        return;
+      }
+    }
+
+    state.brushPoints = [];
     drawScene();
     return;
   }
