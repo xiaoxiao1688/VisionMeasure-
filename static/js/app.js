@@ -558,9 +558,15 @@ function getAnnotationSummary(annotation) {
   const prefix = annotation.name ? `${annotation.name} · ` : "";
 
   if (annotation.type === "line") {
+    const points = annotation.points
+      ? annotation.points
+      : [annotation.start, annotation.end];
+    const firstPoint = points[0] || { x: 0, y: 0 };
+    const lastPoint = points[points.length - 1] || { x: 0, y: 0 };
+
     return {
       title: `${prefix}线段 ${Math.round(annotation.length)} px`,
-      meta: `起点 (${Math.round(annotation.start.x)}, ${Math.round(annotation.start.y)})，终点 (${Math.round(annotation.end.x)}, ${Math.round(annotation.end.y)})`,
+      meta: `${points.length} 个顶点，起点 (${Math.round(firstPoint.x)}, ${Math.round(firstPoint.y)})，终点 (${Math.round(lastPoint.x)}, ${Math.round(lastPoint.y)})`,
       selection: `${Math.round(annotation.length)} px`,
     };
   }
@@ -1196,6 +1202,7 @@ function finalizeLine() {
   }
 
   const polyline = createLineAnnotation([...state.linePoints]);
+  const pointCount = state.linePoints.length;
 
   if (polyline.length < 4) {
     setStatus("这个线段太短，已忽略。", "error");
@@ -1215,7 +1222,7 @@ function finalizeLine() {
   renderAnnotationList();
   updateAnnotationNameEditor();
   drawScene();
-  setStatus(`已添加线段，总长度 ${Math.round(polyline.length)} px，共 ${state.linePoints.length} 个顶点。`);
+  setStatus(`已添加线段，总长度 ${Math.round(polyline.length)} px，共 ${pointCount} 个顶点。`);
 }
 
 function undoLastAction() {
