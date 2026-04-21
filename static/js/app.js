@@ -94,6 +94,13 @@ const state = {
 const ctx = elements.canvas.getContext("2d");
 const canvasContainer = elements.canvas.parentElement;
 
+function getDevicePixelRatio() {
+  return Math.max(1, window.devicePixelRatio || 1);
+}
+
+let canvasCssWidth = 0;
+let canvasCssHeight = 0;
+
 function setStatus(message, tone = "default") {
   elements.statusLine.textContent = message;
   elements.statusLine.style.background =
@@ -155,12 +162,20 @@ function updateImagePositionDisplay() {
 
 function syncCanvasSize() {
   const bounds = canvasContainer.getBoundingClientRect();
-  const width = Math.max(320, Math.floor(bounds.width));
-  const height = Math.max(320, Math.floor(bounds.height));
+  const cssWidth = Math.max(320, Math.floor(bounds.width));
+  const cssHeight = Math.max(320, Math.floor(bounds.height));
+  const dpr = getDevicePixelRatio();
+  const physicalWidth = cssWidth * dpr;
+  const physicalHeight = cssHeight * dpr;
 
-  if (elements.canvas.width !== width || elements.canvas.height !== height) {
-    elements.canvas.width = width;
-    elements.canvas.height = height;
+  if (elements.canvas.width !== physicalWidth || elements.canvas.height !== physicalHeight) {
+    elements.canvas.width = physicalWidth;
+    elements.canvas.height = physicalHeight;
+    canvasCssWidth = cssWidth;
+    canvasCssHeight = cssHeight;
+  } else {
+    canvasCssWidth = cssWidth;
+    canvasCssHeight = cssHeight;
   }
 
   computeImagePlacement();
@@ -175,8 +190,8 @@ function computeImagePlacement() {
   }
 
   const padding = 36;
-  const availableWidth = elements.canvas.width - padding * 2;
-  const availableHeight = elements.canvas.height - padding * 2;
+  const availableWidth = canvasCssWidth - padding * 2;
+  const availableHeight = canvasCssHeight - padding * 2;
   const scale = Math.min(
     availableWidth / state.image.width,
     availableHeight / state.image.height,
@@ -188,8 +203,8 @@ function computeImagePlacement() {
 
   state.imagePlacement = {
     scale,
-    x: (elements.canvas.width - drawWidth) / 2 + state.imageOffset.x,
-    y: (elements.canvas.height - drawHeight) / 2 + state.imageOffset.y,
+    x: (canvasCssWidth - drawWidth) / 2 + state.imageOffset.x,
+    y: (canvasCssHeight - drawHeight) / 2 + state.imageOffset.y,
     width: drawWidth,
     height: drawHeight,
   };
@@ -197,10 +212,16 @@ function computeImagePlacement() {
 }
 
 function drawScene() {
+  const dpr = getDevicePixelRatio();
+  
   ctx.clearRect(0, 0, elements.canvas.width, elements.canvas.height);
+
+  ctx.save();
+  ctx.scale(dpr, dpr);
 
   if (!state.image || !state.imagePlacement) {
     drawEmptyCanvas();
+    ctx.restore();
     return;
   }
 
@@ -229,6 +250,8 @@ function drawScene() {
   if (state.currentTool === "brush" && state.brushPoints.length) {
     drawBrushDraft();
   }
+
+  ctx.restore();
 }
 
 function drawEmptyCanvas() {
@@ -466,8 +489,8 @@ function drawVertex(x, y, selected) {
 }
 
 function drawLabel(x, y, label) {
-  const safeX = Math.max(12, Math.min(x, elements.canvas.width - 220));
-  const safeY = Math.max(12, Math.min(y, elements.canvas.height - 36));
+  const safeX = Math.max(12, Math.min(x, canvasCssWidth - 220));
+  const safeY = Math.max(12, Math.min(y, canvasCssHeight - 36));
   ctx.font = '600 13px "Aptos", "Segoe UI Variable Text", sans-serif';
   const textWidth = ctx.measureText(label).width;
   ctx.fillStyle = "rgba(10, 16, 19, 0.86)";
