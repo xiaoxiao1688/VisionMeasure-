@@ -43,6 +43,7 @@ const elements = {
   canvas: document.querySelector("#draft-canvas"),
   clearButton: document.querySelector("#clear-button"),
   deleteSelectedButton: document.querySelector("#delete-selected-button"),
+  displayModeButtons: [...document.querySelectorAll("[data-display-mode]")],
   downloadButton: document.querySelector("#download-button"),
   exportFilename: document.querySelector("#export-filename"),
   fileName: document.querySelector("#file-name"),
@@ -89,6 +90,7 @@ const state = {
   editHandleIndex: null,
   editOriginalAnnotation: null,
   editStartPoint: null,
+  displayMode: "fit",
 };
 
 const ctx = elements.canvas.getContext("2d");
@@ -190,23 +192,44 @@ function computeImagePlacement() {
   }
 
   const padding = 36;
-  const availableWidth = canvasCssWidth - padding * 2;
-  const availableHeight = canvasCssHeight - padding * 2;
-  const scale = Math.min(
-    availableWidth / state.image.width,
-    availableHeight / state.image.height,
-    1
-  );
+  let scale;
+
+  if (state.displayMode === "actual") {
+    scale = 1;
+  } else {
+    const availableWidth = canvasCssWidth - padding * 2;
+    const availableHeight = canvasCssHeight - padding * 2;
+    scale = Math.min(
+      availableWidth / state.image.width,
+      availableHeight / state.image.height,
+      1
+    );
+  }
 
   const drawWidth = state.image.width * scale;
   const drawHeight = state.image.height * scale;
 
+  const alignedWidth = Math.round(drawWidth);
+  const alignedHeight = Math.round(drawHeight);
+
+  let baseX, baseY;
+  if (state.displayMode === "actual") {
+    baseX = Math.max(padding, (canvasCssWidth - alignedWidth) / 2);
+    baseY = Math.max(padding, (canvasCssHeight - alignedHeight) / 2);
+  } else {
+    baseX = (canvasCssWidth - alignedWidth) / 2;
+    baseY = (canvasCssHeight - alignedHeight) / 2;
+  }
+
+  const alignedX = Math.round(baseX + state.imageOffset.x);
+  const alignedY = Math.round(baseY + state.imageOffset.y);
+
   state.imagePlacement = {
     scale,
-    x: (canvasCssWidth - drawWidth) / 2 + state.imageOffset.x,
-    y: (canvasCssHeight - drawHeight) / 2 + state.imageOffset.y,
-    width: drawWidth,
-    height: drawHeight,
+    x: alignedX,
+    y: alignedY,
+    width: alignedWidth,
+    height: alignedHeight,
   };
   updateImagePositionDisplay();
 }
@@ -228,8 +251,10 @@ function drawScene() {
   const placement = state.imagePlacement;
 
   ctx.save();
-  ctx.shadowColor = "rgba(0, 0, 0, 0.28)";
-  ctx.shadowBlur = 30;
+  ctx.shadowColor = "rgba(0, 0, 0, 0.15)";
+  ctx.shadowBlur = 6;
+  ctx.shadowOffsetX = 0;
+  ctx.shadowOffsetY = 2;
   ctx.drawImage(state.image, placement.x, placement.y, placement.width, placement.height);
   ctx.restore();
 
@@ -671,6 +696,28 @@ function updateToolButtons() {
   elements.toolButtons.forEach((button) => {
     button.classList.toggle("active", button.dataset.tool === state.currentTool);
   });
+}
+
+function updateDisplayModeButtons() {
+  elements.displayModeButtons.forEach((button) => {
+    button.classList.toggle("active", button.dataset.displayMode === state.displayMode);
+  });
+}
+
+function setDisplayMode(mode) {
+  if (state.displayMode === mode) {
+    return;
+  }
+
+  state.displayMode = mode;
+  updateDisplayModeButtons();
+
+  if (state.image) {
+    state.imageOffset = { x: 0, y: 0 };
+    computeImagePlacement();
+    drawScene();
+    setStatus(`已切换到${mode === "actual" ? "100% 实际像素" : "适应画布"}显示模式。`);
+  }
 }
 
 function pushUndoAdd(annotation) {
@@ -1560,6 +1607,12 @@ elements.imageLoader.addEventListener("change", (event) => {
 elements.toolButtons.forEach((button) => {
   button.addEventListener("click", () => {
     setCurrentTool(button.dataset.tool);
+  });
+});
+
+elements.displayModeButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    setDisplayMode(button.dataset.displayMode);
   });
 });
 
