@@ -13,6 +13,23 @@ DATA_DIR = BASE_DIR / "data"
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
 
+IMAGE_MIME_TO_SUFFIX = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/jpg": ".jpg",
+    "image/webp": ".webp",
+    "image/bmp": ".bmp",
+    "image/x-ms-bmp": ".bmp",
+}
+
+IMAGE_SUFFIX_TO_MIME = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".bmp": "image/bmp",
+}
+
 
 def _slugify(value: str) -> str:
     cleaned = re.sub(r"[^a-zA-Z0-9_-]+", "-", value).strip("-")
@@ -36,9 +53,23 @@ def _parse_timestamp(filename: str) -> str | None:
     return parsed.replace(tzinfo=timezone.utc).isoformat()
 
 
+def _get_data_url_parts(base64_data: str) -> tuple[str | None, str]:
+    if base64_data.startswith("data:") and "," in base64_data:
+        header, encoded = base64_data.split(",", 1)
+        mime_type = header[5:].split(";", 1)[0].lower()
+        return mime_type, encoded
+
+    return None, base64_data
+
+
+def _get_suffix_for_base64_image(base64_data: str, default_suffix: str = ".png") -> str:
+    mime_type, _ = _get_data_url_parts(base64_data)
+    return IMAGE_MIME_TO_SUFFIX.get(mime_type or "", default_suffix)
+
+
 def _save_base64_image(base64_data: str, output_path: Path) -> bool:
     try:
-        encoded = base64_data.split(",", 1)[1] if "," in base64_data else base64_data
+        _, encoded = _get_data_url_parts(base64_data)
         image_data = base64.b64decode(encoded)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_bytes(image_data)
@@ -48,12 +79,22 @@ def _save_base64_image(base64_data: str, output_path: Path) -> bool:
         return False
 
 
-def _load_base64_image(path: Path) -> str | None:
-    if not path.exists():
+def _load_base64_image(path: Path | None) -> str | None:
+    if not path or not path.exists():
         return None
 
     encoded = base64.b64encode(path.read_bytes()).decode("utf-8")
-    return f"data:image/png;base64,{encoded}"
+    mime_type = IMAGE_SUFFIX_TO_MIME.get(path.suffix.lower(), "application/octet-stream")
+    return f"data:{mime_type};base64,{encoded}"
+
+
+def _find_saved_image(file_prefix: str, suffix: str) -> Path | None:
+    for extension in (".png", ".jpg", ".jpeg", ".webp", ".bmp"):
+        candidate = DATA_DIR / f"{file_prefix}{suffix}{extension}"
+        if candidate.exists():
+            return candidate
+
+    return None
 
 
 @app.get("/")
@@ -87,8 +128,10 @@ def list_sessions():
                 "savedAt": _parse_timestamp(json_path.name) or content.get("savedAtUtc", ""),
                 "annotationCount": len(content.get("annotations", [])),
                 "imageName": image_meta.get("name", ""),
-                "hasOriginalImage": (DATA_DIR / f"{file_prefix}-original.png").exists(),
-                "hasAnnotatedImage": (DATA_DIR / f"{file_prefix}-annotated.png").exists(),
+                "imageTags": content.get("imageTags", []),
+                "exportFilename": content.get("exportFilename", ""),
+                "hasOriginalImage": _find_saved_image(file_prefix, "-original") is not None,
+                "hasAnnotatedImage": _find_saved_image(file_prefix, "-annotated") is not None,
             }
         )
 
@@ -110,8 +153,8 @@ def get_session(file_prefix: str):
     except (json.JSONDecodeError, IOError) as error:
         return jsonify({"error": f"Failed to load session: {error}"}), 500
 
-    content["originalImage"] = _load_base64_image(DATA_DIR / f"{safe_prefix}-original.png")
-    content["annotatedImage"] = _load_base64_image(DATA_DIR / f"{safe_prefix}-annotated.png")
+    content["originalImage"] = _load_base64_image(_find_saved_image(safe_prefix, "-original"))
+    content["annotatedImage"] = _load_base64_image(_find_saved_image(safe_prefix, "-annotated"))
     return jsonify(content), 200
 
 
@@ -123,11 +166,10 @@ def delete_session(file_prefix: str):
     if not safe_prefix:
         return jsonify({"error": "Invalid session id."}), 400
 
-    targets = [
-        DATA_DIR / f"{safe_prefix}.json",
-        DATA_DIR / f"{safe_prefix}-original.png",
-        DATA_DIR / f"{safe_prefix}-annotated.png",
-    ]
+    targets = [DATA_DIR / f"{safe_prefix}.json"]
+    for suffix in ("-original", "-annotated"):
+        for extension in (".png", ".jpg", ".jpeg", ".webp", ".bmp"):
+            targets.append(DATA_DIR / f"{safe_prefix}{suffix}{extension}")
 
     deleted_files: list[str] = []
     for target in targets:
@@ -154,10 +196,15 @@ def save_annotations():
     if not isinstance(annotations, list):
         return jsonify({"error": "`annotations` must be a list."}), 400
 
+    image_tags = payload.get("imageTags", [])
+    if not isinstance(image_tags, list):
+        return jsonify({"error": "`imageTags` must be a list."}), 400
+
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
     project_name = str(payload.get("projectName") or "GeoDraft")
     project_notes = str(payload.get("projectNotes") or "")
+    export_filename = str(payload.get("exportFilename") or "")
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     file_prefix = f"{timestamp}-{_slugify(project_name)}"
 
@@ -165,7 +212,7 @@ def save_annotations():
 
     original_image = payload.get("originalImage")
     if isinstance(original_image, str) and original_image:
-        original_path = DATA_DIR / f"{file_prefix}-original.png"
+        original_path = DATA_DIR / f"{file_prefix}-original{_get_suffix_for_base64_image(original_image)}"
         if _save_base64_image(original_image, original_path):
             saved_files.append(original_path.name)
 
@@ -178,6 +225,8 @@ def save_annotations():
     document = {
         "projectName": project_name,
         "projectNotes": project_notes,
+        "exportFilename": export_filename,
+        "imageTags": image_tags,
         "savedAtUtc": timestamp,
         "imageMeta": payload.get("imageMeta", {}),
         "annotations": annotations,
@@ -200,4 +249,4 @@ def save_annotations():
 
 
 if __name__ == "__main__":
-    app.run(debug=True, host="127.0.0.1", port=5000)
+    app.run(debug=False, use_reloader=False, host="127.0.0.1", port=5000)

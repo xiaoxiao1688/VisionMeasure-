@@ -242,6 +242,66 @@ textarea {
   color: var(--muted);
 }
 
+.image-position-panel {
+  margin-top: 2px;
+  padding: 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(25, 50, 60, 0.12);
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.image-position-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.image-position-header .field-label {
+  margin: 0;
+}
+
+.image-position-value {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--accent-strong);
+}
+
+.image-position-grid {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 52px));
+  justify-content: center;
+  gap: 8px;
+}
+
+.image-position-spacer {
+  min-height: 44px;
+}
+
+.image-position-button {
+  appearance: none;
+  border: 0;
+  min-height: 44px;
+  border-radius: 14px;
+  background: rgba(25, 50, 60, 0.08);
+  color: var(--ink);
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 140ms ease, background-color 140ms ease, color 140ms ease;
+}
+
+.image-position-button:hover {
+  transform: translateY(-1px);
+  background: rgba(214, 106, 61, 0.14);
+  color: var(--accent-strong);
+}
+
+.image-position-button.reset {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
 .actions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

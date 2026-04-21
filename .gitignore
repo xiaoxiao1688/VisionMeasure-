@@ -6,3 +6,5 @@ data/*-original.png
 data/*-annotated.png
 !data/.gitkeep
 gcm-diagnose.log
+data/_run_*.log
+data/_stable_*.log

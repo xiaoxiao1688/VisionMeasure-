@@ -12,7 +12,7 @@
         <div class="brand-block">
           <p class="eyebrow">Graphics Utility Prototype</p>
           <h1>GeoDraft</h1>
-          <p class="subtitle">一个本地优先的图片标注与几何测量工具。</p>
+          <p class="subtitle">一个本地优先的图片打标与几何测量工具。</p>
         </div>
 
         <section class="panel">
@@ -20,7 +20,7 @@
           <input id="project-name" type="text" value="GeoDraft Prototype" />
 
           <label class="field-label" for="project-notes">项目备注</label>
-          <textarea id="project-notes" placeholder="写一点说明，方便以后回看。"></textarea>
+          <textarea id="project-notes" placeholder="记录这张图要说明的内容。"></textarea>
 
           <label class="field-label" for="image-loader">加载图片</label>
           <div class="file-picker">
@@ -36,20 +36,39 @@
             <span class="field-label">工具</span>
             <div class="tool-group">
               <button data-tool="rectangle" class="tool-button active" type="button">矩形</button>
-              <button data-tool="line" class="tool-button" type="button">线段</button>
+              <button data-tool="line" class="tool-button" type="button">折线</button>
               <button data-tool="polygon" class="tool-button" type="button">多边形</button>
               <button data-tool="brush" class="tool-button" type="button">画笔</button>
             </div>
             <p class="tool-help">
-              矩形用来框选区域，线段用来测距离，多边形适合不规则区域，双击可完成闭合，画笔可以自由绘制。
+              矩形适合框选，折线适合连续路径，多边形适合区域边界，画笔适合自由涂绘。
             </p>
           </div>
 
           <label class="field-label" for="export-filename">导出文件名</label>
-          <input id="export-filename" type="text" placeholder="自定义导出图片名称（可选）" />
+          <input id="export-filename" type="text" placeholder="可选，自定义导出 PNG 的文件名。" />
 
           <label class="field-label" for="image-tags">图片标签</label>
-          <input id="image-tags" type="text" placeholder="用逗号分隔多个标签，如：建筑,风景,测量" />
+          <input id="image-tags" type="text" placeholder="用逗号分隔多个标签，例如：建筑, 风景, 测量" />
+
+          <div class="image-position-panel">
+            <div class="image-position-header">
+              <span class="field-label">图片位置</span>
+              <span id="image-position-value" class="image-position-value">X 0 / Y 0</span>
+            </div>
+            <div class="image-position-grid">
+              <span class="image-position-spacer" aria-hidden="true"></span>
+              <button class="image-position-button" type="button" data-nudge-image="up">↑</button>
+              <span class="image-position-spacer" aria-hidden="true"></span>
+              <button class="image-position-button" type="button" data-nudge-image="left">←</button>
+              <button class="image-position-button reset" id="reset-image-position" type="button">复位</button>
+              <button class="image-position-button" type="button" data-nudge-image="right">→</button>
+              <span class="image-position-spacer" aria-hidden="true"></span>
+              <button class="image-position-button" type="button" data-nudge-image="down">↓</button>
+              <span class="image-position-spacer" aria-hidden="true"></span>
+            </div>
+            <p class="tool-help">只调整画布里的图片显示位置，不影响标注尺寸和坐标。</p>
+          </div>
 
           <div class="actions">
             <button id="undo-button" class="ghost" type="button">
@@ -63,7 +82,7 @@
                   stroke-width="1.8"
                 ></path>
               </svg>
-              <span>撤销 (Ctrl+Z)</span>
+              <span>撤销</span>
             </button>
             <button id="clear-button" class="ghost" type="button">
               <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -106,7 +125,7 @@
             </button>
           </div>
 
-          <p id="status-line" class="status-line">加载图片后，就可以开始标注和测量。</p>
+          <p id="status-line" class="status-line">加载图片后，就可以开始打标。</p>
         </section>
 
         <section class="panel metrics">
@@ -163,14 +182,14 @@
             <p class="eyebrow">Canvas Workspace</p>
             <h2>图片标注</h2>
           </div>
-          <p class="workspace-note">支持图片导入、几何标注、项目备注、历史恢复和标注图导出。</p>
+          <p class="workspace-note">支持自由打标、历史恢复、标注命名、导出 PNG 和会话删除。</p>
         </div>
 
         <section class="canvas-panel">
           <canvas id="draft-canvas" aria-label="GeoDraft canvas"></canvas>
           <div id="canvas-overlay" class="canvas-overlay">
             <strong>画布已就绪</strong>
-            <span>先加载一张本地图片，再开始标注。</span>
+            <span>先加载一张本地图片，再开始打标。</span>
           </div>
         </section>
       </main>
