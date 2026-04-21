@@ -21,6 +21,7 @@ const elements = {
   selectionSize: document.querySelector("#selection-size"),
   statusLine: document.querySelector("#status-line"),
   toolButtons: [...document.querySelectorAll("[data-tool]")],
+  undoButton: document.querySelector("#undo-button"),
 };
 
 const state = {
@@ -35,9 +36,11 @@ const state = {
   imagePlacement: null,
   pointerStart: null,
   polygonPoints: [],
+  linePoints: [],
   selectedId: null,
   sessions: [],
   brushPoints: [],
+  undoStack: [],
 };
 
 const ctx = elements.canvas.getContext("2d");
@@ -52,7 +55,7 @@ function setStatus(message, tone = "default") {
 
 function getToolInstructions(tool = state.currentTool) {
   if (tool === "line") {
-    return "线段工具已启用，在两个点之间拖动即可记录距离。";
+    return "线段工具已启用，点击添加顶点，双击或按 Enter 完成，按 Backspace 撤销上一段。";
   }
 
   if (tool === "polygon") {
@@ -125,7 +128,7 @@ function drawScene() {
 
   state.annotations.forEach((annotation) => drawAnnotation(annotation));
 
-  if (state.draftAnnotation && state.draftAnnotation.type !== "polygon-preview") {
+  if (state.draftAnnotation && state.draftAnnotation.type !== "polygon-preview" && state.draftAnnotation.type !== "line-preview") {
     drawAnnotation({ ...state.draftAnnotation, id: "draft" }, true);
   }
 
@@ -135,6 +138,10 @@ function drawScene() {
 
   if (state.currentTool === "brush" && state.brushPoints.length) {
     drawBrushDraft();
+  }
+
+  if (state.currentTool === "line" && state.linePoints.length) {
+    drawLineDraft();
   }
 }
 
@@ -193,23 +200,37 @@ function drawRectangleAnnotation(annotation, isDraft) {
 function drawLineAnnotation(annotation) {
   const placement = state.imagePlacement;
   const selected = annotation.id === state.selectedId;
-  const startX = placement.x + annotation.start.x * placement.scale;
-  const startY = placement.y + annotation.start.y * placement.scale;
-  const endX = placement.x + annotation.end.x * placement.scale;
-  const endY = placement.y + annotation.end.y * placement.scale;
-  const midX = (startX + endX) / 2;
-  const midY = (startY + endY) / 2;
+
+  const points = annotation.points
+    ? annotation.points.map((point) => ({
+        x: placement.x + point.x * placement.scale,
+        y: placement.y + point.y * placement.scale,
+      }))
+    : [
+        { x: placement.x + annotation.start.x * placement.scale, y: placement.y + annotation.start.y * placement.scale },
+        { x: placement.x + annotation.end.x * placement.scale, y: placement.y + annotation.end.y * placement.scale },
+      ];
+
+  if (points.length < 2) {
+    return;
+  }
+
+  const centroid = getPolygonCentroid(points);
 
   ctx.save();
   ctx.lineWidth = selected ? 3 : 2;
   ctx.strokeStyle = selected ? "#8ae6ff" : "#55d5ff";
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
   ctx.beginPath();
-  ctx.moveTo(startX, startY);
-  ctx.lineTo(endX, endY);
+  ctx.moveTo(points[0].x, points[0].y);
+  for (let index = 1; index < points.length; index += 1) {
+    ctx.lineTo(points[index].x, points[index].y);
+  }
   ctx.stroke();
-  drawVertex(startX, startY, selected);
-  drawVertex(endX, endY, selected);
-  drawLabel(midX - 32, midY - 32, getAnnotationLabel(annotation));
+
+  points.forEach((point) => drawVertex(point.x, point.y, selected));
+  drawLabel(centroid.x - 32, centroid.y - 32, getAnnotationLabel(annotation));
   ctx.restore();
 }
 
@@ -330,6 +351,40 @@ function drawBrushDraft() {
   ctx.restore();
 }
 
+function drawLineDraft() {
+  const placement = state.imagePlacement;
+
+  if (!state.linePoints.length) {
+    return;
+  }
+
+  const points = state.linePoints.map((point) => ({
+    x: placement.x + point.x * placement.scale,
+    y: placement.y + point.y * placement.scale,
+  }));
+
+  ctx.save();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = "#55d5ff";
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  for (let index = 1; index < points.length; index += 1) {
+    ctx.lineTo(points[index].x, points[index].y);
+  }
+
+  if (state.draftAnnotation && state.draftAnnotation.type === "line-preview") {
+    const previewX = placement.x + state.draftAnnotation.previewPoint.x * placement.scale;
+    const previewY = placement.y + state.draftAnnotation.previewPoint.y * placement.scale;
+    ctx.lineTo(previewX, previewY);
+  }
+
+  ctx.stroke();
+  points.forEach((point) => drawVertex(point.x, point.y, false));
+  ctx.restore();
+}
+
 function drawVertex(x, y, selected) {
   ctx.save();
   ctx.beginPath();
@@ -391,18 +446,24 @@ function normalizeRectangle(start, end) {
   };
 }
 
-function createLineAnnotation(start, end) {
-  const deltaX = end.x - start.x;
-  const deltaY = end.y - start.y;
-
+function createLineAnnotation(points) {
   return {
     id: crypto.randomUUID(),
     type: "line",
     name: "",
-    start,
-    end,
-    length: Math.hypot(deltaX, deltaY),
+    points,
+    length: getPolylineLength(points),
   };
+}
+
+function getPolylineLength(points) {
+  let length = 0;
+  for (let index = 1; index < points.length; index += 1) {
+    const current = points[index];
+    const previous = points[index - 1];
+    length += Math.hypot(current.x - previous.x, current.y - previous.y);
+  }
+  return length;
 }
 
 function createPolygonAnnotation(points) {
@@ -538,6 +599,7 @@ function resetDraftState() {
   state.pointerStart = null;
   state.draftAnnotation = null;
   state.polygonPoints = [];
+  state.linePoints = [];
   state.brushPoints = [];
 }
 
@@ -737,9 +799,22 @@ function exportAnnotatedImage() {
     if (annotation.type === "line") {
       tempCtx.lineWidth = 3;
       tempCtx.strokeStyle = "#55d5ff";
+      tempCtx.lineCap = "round";
+      tempCtx.lineJoin = "round";
+
+      const points = annotation.points
+        ? annotation.points
+        : [annotation.start, annotation.end];
+
+      if (points.length < 2) {
+        return;
+      }
+
       tempCtx.beginPath();
-      tempCtx.moveTo(annotation.start.x, annotation.start.y);
-      tempCtx.lineTo(annotation.end.x, annotation.end.y);
+      tempCtx.moveTo(points[0].x, points[0].y);
+      for (let index = 1; index < points.length; index += 1) {
+        tempCtx.lineTo(points[index].x, points[index].y);
+      }
       tempCtx.stroke();
       return;
     }
@@ -1089,6 +1164,11 @@ function finalizePolygon() {
     return;
   }
 
+  state.undoStack.push({
+    action: "add",
+    annotation: { ...polygon },
+  });
+
   state.annotations.push(polygon);
   state.selectedId = polygon.id;
   resetDraftState();
@@ -1108,6 +1188,56 @@ elements.toolButtons.forEach((button) => {
     setCurrentTool(button.dataset.tool);
   });
 });
+
+function finalizeLine() {
+  if (state.linePoints.length < 2) {
+    setStatus("线段至少需要两个顶点。", "error");
+    return;
+  }
+
+  const polyline = createLineAnnotation([...state.linePoints]);
+
+  if (polyline.length < 4) {
+    setStatus("这个线段太短，已忽略。", "error");
+    resetDraftState();
+    drawScene();
+    return;
+  }
+
+  state.undoStack.push({
+    action: "add",
+    annotation: { ...polyline },
+  });
+
+  state.annotations.push(polyline);
+  state.selectedId = polyline.id;
+  resetDraftState();
+  renderAnnotationList();
+  updateAnnotationNameEditor();
+  drawScene();
+  setStatus(`已添加线段，总长度 ${Math.round(polyline.length)} px，共 ${state.linePoints.length} 个顶点。`);
+}
+
+function undoLastAction() {
+  if (state.undoStack.length === 0) {
+    setStatus("没有可撤销的操作。", "error");
+    return;
+  }
+
+  const lastAction = state.undoStack.pop();
+
+  if (lastAction.action === "add") {
+    const index = state.annotations.findIndex((a) => a.id === lastAction.annotation.id);
+    if (index !== -1) {
+      state.annotations.splice(index, 1);
+      state.selectedId = null;
+      renderAnnotationList();
+      updateAnnotationNameEditor();
+      drawScene();
+      setStatus("已撤销上一个操作。");
+    }
+  }
+}
 
 elements.canvas.addEventListener("pointerdown", (event) => {
   if (!state.image) {
@@ -1132,6 +1262,15 @@ elements.canvas.addEventListener("pointerdown", (event) => {
     return;
   }
 
+  if (state.currentTool === "line") {
+    state.linePoints.push(point);
+    state.draftAnnotation = null;
+    renderAnnotationList();
+    drawScene();
+    setStatus(`已添加顶点 ${state.linePoints.length}，双击或按 Enter 完成，按 Backspace 撤销上一个顶点。`);
+    return;
+  }
+
   if (state.currentTool === "brush") {
     state.drawing = true;
     state.brushPoints = [point];
@@ -1142,8 +1281,7 @@ elements.canvas.addEventListener("pointerdown", (event) => {
 
   state.drawing = true;
   state.pointerStart = point;
-  state.draftAnnotation =
-    state.currentTool === "line" ? createLineAnnotation(point, point) : normalizeRectangle(point, point);
+  state.draftAnnotation = normalizeRectangle(point, point);
   drawScene();
 });
 
@@ -1152,6 +1290,14 @@ elements.canvas.addEventListener("pointermove", (event) => {
     const point = pointerToImageCoordinates(event);
     state.draftAnnotation =
       state.polygonPoints.length && point ? { type: "polygon-preview", previewPoint: point } : null;
+    drawScene();
+    return;
+  }
+
+  if (state.currentTool === "line") {
+    const point = pointerToImageCoordinates(event);
+    state.draftAnnotation =
+      state.linePoints.length && point ? { type: "line-preview", previewPoint: point } : null;
     drawScene();
     return;
   }
@@ -1178,15 +1324,12 @@ elements.canvas.addEventListener("pointermove", (event) => {
     return;
   }
 
-  state.draftAnnotation =
-    state.currentTool === "line"
-      ? createLineAnnotation(state.pointerStart, point)
-      : normalizeRectangle(state.pointerStart, point);
+  state.draftAnnotation = normalizeRectangle(state.pointerStart, point);
   drawScene();
 });
 
 elements.canvas.addEventListener("pointerup", (event) => {
-  if (state.currentTool === "polygon") {
+  if (state.currentTool === "polygon" || state.currentTool === "line") {
     return;
   }
 
@@ -1213,6 +1356,11 @@ elements.canvas.addEventListener("pointerup", (event) => {
       return;
     }
 
+    state.undoStack.push({
+      action: "add",
+      annotation: { ...annotation },
+    });
+
     state.annotations.push(annotation);
     state.selectedId = annotation.id;
     renderAnnotationList();
@@ -1236,39 +1384,34 @@ elements.canvas.addEventListener("pointerup", (event) => {
     return;
   }
 
-  const annotation =
-    state.currentTool === "line"
-      ? createLineAnnotation(state.pointerStart, point)
-      : normalizeRectangle(state.pointerStart, point);
+  const annotation = normalizeRectangle(state.pointerStart, point);
 
   state.pointerStart = null;
   state.draftAnnotation = null;
 
-  const tooSmall =
-    state.currentTool === "line"
-      ? annotation.length < 4
-      : annotation.width < 4 || annotation.height < 4;
+  const tooSmall = annotation.width < 4 || annotation.height < 4;
 
   if (tooSmall) {
-    setStatus(`这个${state.currentTool === "line" ? "线段" : "矩形"}太小，已忽略。`, "error");
+    setStatus("这个矩形太小，已忽略。", "error");
     drawScene();
     return;
   }
+
+  state.undoStack.push({
+    action: "add",
+    annotation: { ...annotation },
+  });
 
   state.annotations.push(annotation);
   state.selectedId = annotation.id;
   renderAnnotationList();
   updateAnnotationNameEditor();
   drawScene();
-  setStatus(
-    state.currentTool === "line"
-      ? `已添加线段，长度 ${Math.round(annotation.length)} px。`
-      : `已添加矩形，尺寸 ${Math.round(annotation.width)} × ${Math.round(annotation.height)} px。`
-  );
+  setStatus(`已添加矩形，尺寸 ${Math.round(annotation.width)} × ${Math.round(annotation.height)} px。`);
 });
 
 elements.canvas.addEventListener("pointerleave", () => {
-  if (state.currentTool === "polygon") {
+  if (state.currentTool === "polygon" || state.currentTool === "line") {
     state.draftAnnotation = null;
     drawScene();
     return;
@@ -1286,6 +1429,11 @@ elements.canvas.addEventListener("pointerleave", () => {
       state.brushPoints = [];
 
       if (annotation.length >= 4) {
+        state.undoStack.push({
+          action: "add",
+          annotation: { ...annotation },
+        });
+
         state.annotations.push(annotation);
         state.selectedId = annotation.id;
         renderAnnotationList();
@@ -1312,27 +1460,66 @@ elements.canvas.addEventListener("pointerleave", () => {
 });
 
 elements.canvas.addEventListener("dblclick", (event) => {
-  if (state.currentTool !== "polygon") {
+  if (state.currentTool === "polygon") {
+    event.preventDefault();
+    finalizePolygon();
     return;
   }
 
-  event.preventDefault();
-  finalizePolygon();
+  if (state.currentTool === "line") {
+    event.preventDefault();
+    finalizeLine();
+    return;
+  }
 });
 
 document.addEventListener("keydown", (event) => {
-  if (state.currentTool !== "polygon") {
+  if (event.ctrlKey && event.key === "z") {
+    event.preventDefault();
+    undoLastAction();
     return;
   }
 
-  if (event.key === "Enter") {
-    finalizePolygon();
+  if (state.currentTool === "polygon") {
+    if (event.key === "Enter") {
+      finalizePolygon();
+    }
+
+    if (event.key === "Escape") {
+      resetDraftState();
+      drawScene();
+      setStatus("已取消当前多边形绘制。");
+    }
+
+    if (event.key === "Backspace" && state.polygonPoints.length > 0) {
+      event.preventDefault();
+      state.polygonPoints.pop();
+      drawScene();
+      setStatus(`已撤销上一个顶点，当前共 ${state.polygonPoints.length} 个顶点。`);
+    }
+
+    return;
   }
 
-  if (event.key === "Escape") {
-    resetDraftState();
-    drawScene();
-    setStatus("已取消当前多边形绘制。");
+  if (state.currentTool === "line") {
+    if (event.key === "Enter") {
+      finalizeLine();
+    }
+
+    if (event.key === "Escape") {
+      resetDraftState();
+      drawScene();
+      setStatus("已取消当前线段绘制。");
+    }
+
+    if (event.key === "Backspace" && state.linePoints.length > 0) {
+      event.preventDefault();
+      state.linePoints.pop();
+      drawScene();
+      setStatus(`已撤销上一个顶点，当前共 ${state.linePoints.length} 个顶点。`);
+    }
+
+    return;
   }
 });
 
@@ -1361,9 +1548,14 @@ elements.historyList.addEventListener("click", (event) => {
   loadSession(item.dataset.filename);
 });
 
+elements.undoButton.addEventListener("click", () => {
+  undoLastAction();
+});
+
 elements.clearButton.addEventListener("click", () => {
   state.annotations = [];
   state.selectedId = null;
+  state.undoStack = [];
   resetDraftState();
   renderAnnotationList();
   updateAnnotationNameEditor();
