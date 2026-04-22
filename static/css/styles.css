@@ -261,6 +261,37 @@ textarea {
   margin: 0;
 }
 
+.display-mode-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.display-mode-button {
+  appearance: none;
+  border: 0;
+  min-height: 34px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(25, 50, 60, 0.08);
+  color: var(--ink);
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 140ms ease, background-color 140ms ease, color 140ms ease;
+}
+
+.display-mode-button:hover {
+  transform: translateY(-1px);
+  background: rgba(214, 106, 61, 0.14);
+  color: var(--accent-strong);
+}
+
+.display-mode-button.active {
+  background: var(--accent);
+  color: white;
+}
+
 .image-position-value {
   font-size: 0.8rem;
   font-weight: 700;

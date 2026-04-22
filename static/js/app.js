@@ -12,6 +12,13 @@ function ensureImagePositionPanelMarkup() {
     "afterend",
     `
       <div class="image-position-panel">
+          <div class="image-position-header">
+            <span class="field-label">图片显示</span>
+            <div class="display-mode-group">
+            <button class="display-mode-button active" type="button" data-display-mode="fit">适应</button>
+            <button class="display-mode-button" type="button" data-display-mode="actual">100%</button>
+          </div>
+        </div>
         <div class="image-position-header">
           <span class="field-label">图片位置</span>
           <span id="image-position-value" class="image-position-value">X 0 / Y 0</span>
@@ -90,7 +97,7 @@ const state = {
   editHandleIndex: null,
   editOriginalAnnotation: null,
   editStartPoint: null,
-  displayMode: "actual",
+  displayMode: "fit",
 };
 
 const ctx = elements.canvas.getContext("2d");
@@ -102,6 +109,18 @@ function getDevicePixelRatio() {
 
 let canvasCssWidth = 0;
 let canvasCssHeight = 0;
+
+function getCanvasLogicalSize() {
+  if (canvasCssWidth > 0 && canvasCssHeight > 0) {
+    return { width: canvasCssWidth, height: canvasCssHeight };
+  }
+
+  const bounds = canvasContainer.getBoundingClientRect();
+  return {
+    width: Math.max(320, Math.floor(bounds.width)),
+    height: Math.max(320, Math.floor(bounds.height)),
+  };
+}
 
 function setStatus(message, tone = "default") {
   elements.statusLine.textContent = message;
@@ -191,39 +210,39 @@ function computeImagePlacement() {
     return;
   }
 
+  const { width: logicalCanvasWidth, height: logicalCanvasHeight } = getCanvasLogicalSize();
   const padding = 36;
   const dpr = getDevicePixelRatio();
-  let scale;
-
-  if (state.displayMode === "actual") {
-    scale = 1 / dpr;
-  } else {
-    const availableWidth = canvasCssWidth - padding * 2;
-    const availableHeight = canvasCssHeight - padding * 2;
-    scale = Math.min(
-      availableWidth / state.image.width,
-      availableHeight / state.image.height,
-      1
-    );
-  }
+  const safeOffsetX = Number.isFinite(state.imageOffset?.x) ? state.imageOffset.x : 0;
+  const safeOffsetY = Number.isFinite(state.imageOffset?.y) ? state.imageOffset.y : 0;
+  const availableWidth = Math.max(1, logicalCanvasWidth - padding * 2);
+  const availableHeight = Math.max(1, logicalCanvasHeight - padding * 2);
+  const scale =
+    state.displayMode === "actual"
+      ? 1 / dpr
+      : Math.min(
+          availableWidth / state.image.width,
+          availableHeight / state.image.height,
+          1
+        );
 
   const drawWidth = state.image.width * scale;
   const drawHeight = state.image.height * scale;
+  const alignedWidth = Math.max(1, Math.round(drawWidth));
+  const alignedHeight = Math.max(1, Math.round(drawHeight));
 
-  const alignedWidth = Math.round(drawWidth);
-  const alignedHeight = Math.round(drawHeight);
-
-  let baseX, baseY;
+  let baseX;
+  let baseY;
   if (state.displayMode === "actual") {
-    baseX = Math.max(padding, (canvasCssWidth - alignedWidth) / 2);
-    baseY = Math.max(padding, (canvasCssHeight - alignedHeight) / 2);
+    baseX = Math.max(padding, (logicalCanvasWidth - alignedWidth) / 2);
+    baseY = Math.max(padding, (logicalCanvasHeight - alignedHeight) / 2);
   } else {
-    baseX = (canvasCssWidth - alignedWidth) / 2;
-    baseY = (canvasCssHeight - alignedHeight) / 2;
+    baseX = (logicalCanvasWidth - alignedWidth) / 2;
+    baseY = (logicalCanvasHeight - alignedHeight) / 2;
   }
 
-  const alignedX = Math.round(baseX + state.imageOffset.x);
-  const alignedY = Math.round(baseY + state.imageOffset.y);
+  const alignedX = Math.round(baseX + safeOffsetX);
+  const alignedY = Math.round(baseY + safeOffsetY);
 
   state.imagePlacement = {
     scale,
@@ -231,6 +250,11 @@ function computeImagePlacement() {
     y: alignedY,
     width: alignedWidth,
     height: alignedHeight,
+  };
+
+  state.imageOffset = {
+    x: Math.round(safeOffsetX),
+    y: Math.round(safeOffsetY),
   };
   updateImagePositionDisplay();
 }
@@ -252,8 +276,8 @@ function drawScene() {
   const placement = state.imagePlacement;
 
   ctx.save();
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = "high";
+  ctx.imageSmoothingEnabled = state.displayMode !== "actual";
+  ctx.imageSmoothingQuality = state.displayMode === "actual" ? "low" : "high";
   ctx.drawImage(state.image, placement.x, placement.y, placement.width, placement.height);
   ctx.restore();
 
@@ -1015,10 +1039,12 @@ function resetSessionStateForNewImage() {
   state.undoStack = [];
   state.currentSessionPrefix = null;
   state.imageOffset = { x: 0, y: 0 };
+  state.displayMode = "fit";
   state.originalImageDataUrl = null;
   resetDraftState();
   renderAnnotationList();
   updateAnnotationNameEditor();
+  updateDisplayModeButtons();
   updateImagePositionDisplay();
 }
 
@@ -1367,6 +1393,7 @@ async function loadSession(filePrefix) {
     elements.exportFilename.value = body.exportFilename || "";
     elements.imageTags.value = Array.isArray(body.imageTags) ? body.imageTags.join(", ") : "";
     state.imageOffset = { x: 0, y: 0 };
+    state.displayMode = "fit";
     state.currentSessionPrefix = filePrefix;
     state.originalImageDataUrl = body.originalImage || null;
     state.annotations = Array.isArray(body.annotations) ? body.annotations : [];
@@ -1375,6 +1402,7 @@ async function loadSession(filePrefix) {
     resetDraftState();
     renderAnnotationList();
     updateAnnotationNameEditor();
+    updateDisplayModeButtons();
 
     const imageMeta = body.imageMeta || {};
     const preferredImage = state.originalImageDataUrl || body.annotatedImage;
@@ -1961,15 +1989,20 @@ elements.historyList.addEventListener("click", (event) => {
   loadSession(item.dataset.filename);
 });
 
-elements.undoButton.addEventListener("click", () => {
-  undoLastAction();
-});
+if (elements.undoButton) {
+  elements.undoButton.addEventListener("click", () => {
+    undoLastAction();
+  });
+}
 
-elements.deleteSelectedButton.addEventListener("click", () => {
-  deleteSelectedAnnotation();
-});
+if (elements.deleteSelectedButton) {
+  elements.deleteSelectedButton.addEventListener("click", () => {
+    deleteSelectedAnnotation();
+  });
+}
 
-elements.clearButton.addEventListener("click", () => {
+if (elements.clearButton) {
+  elements.clearButton.addEventListener("click", () => {
   state.annotations = [];
   state.selectedId = null;
   state.undoStack = [];
@@ -1978,31 +2011,42 @@ elements.clearButton.addEventListener("click", () => {
   updateAnnotationNameEditor();
   drawScene();
   setStatus("已清空当前图片上的所有标注。");
-});
+  });
+}
 
-elements.downloadButton.addEventListener("click", () => {
-  downloadAnnotatedImage();
-});
+if (elements.downloadButton) {
+  elements.downloadButton.addEventListener("click", () => {
+    downloadAnnotatedImage();
+  });
+}
 
-elements.saveAnnotationName.addEventListener("click", () => {
-  saveAnnotationName();
-});
+if (elements.saveAnnotationName) {
+  elements.saveAnnotationName.addEventListener("click", () => {
+    saveAnnotationName();
+  });
+}
 
-elements.annotationNameInput.addEventListener("keydown", (event) => {
+if (elements.annotationNameInput) {
+  elements.annotationNameInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter") {
     event.preventDefault();
     saveAnnotationName();
   }
-});
+  });
+}
 
-elements.saveButton.addEventListener("click", () => {
-  saveAnnotations();
-});
+if (elements.saveButton) {
+  elements.saveButton.addEventListener("click", () => {
+    saveAnnotations();
+  });
+}
 
-elements.refreshHistory.addEventListener("click", async () => {
+if (elements.refreshHistory) {
+  elements.refreshHistory.addEventListener("click", async () => {
   await loadHistoryList();
   setStatus("历史记录已刷新。");
-});
+  });
+}
 
 if (elements.resetImagePosition) {
   elements.resetImagePosition.addEventListener("click", () => {
@@ -2014,6 +2058,7 @@ window.addEventListener("resize", syncCanvasSize);
 
 renderAnnotationList();
 updateToolButtons();
+updateDisplayModeButtons();
 updateImagePositionDisplay();
 refreshOverlay();
 syncCanvasSize();
