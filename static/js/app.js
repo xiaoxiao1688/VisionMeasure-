@@ -943,7 +943,18 @@ function updateScalePanel() {
     elements.scaleStatus.textContent = "已标定";
     elements.scalePixels.textContent = `${Math.round(state.scale.pixels)} px`;
     elements.scaleReal.textContent = formatRealLength(state.scale.realLength, state.scale.unit);
-    elements.scaleRatio.textContent = `${Math.round(state.scale.pixelPerUnit)} px/${getUnitLabel(state.scale.unit)}`;
+    
+    let ratioDisplay;
+    if (state.scale.pixelPerUnit < 1) {
+      ratioDisplay = state.scale.pixelPerUnit.toFixed(2);
+    } else if (state.scale.pixelPerUnit >= 1000) {
+      ratioDisplay = state.scale.pixelPerUnit.toFixed(0);
+    } else if (state.scale.pixelPerUnit >= 100) {
+      ratioDisplay = state.scale.pixelPerUnit.toFixed(1);
+    } else {
+      ratioDisplay = state.scale.pixelPerUnit.toFixed(2);
+    }
+    elements.scaleRatio.textContent = `${ratioDisplay} px/${getUnitLabel(state.scale.unit)}`;
     elements.scaleHint.textContent = "比例标定已生效，所有标注将同时显示像素值和真实单位。";
   } else {
     elements.scaleInfo.classList.add("hidden");
@@ -1004,6 +1015,7 @@ function confirmScale() {
 
   const length = parseFloat(elements.scaleLengthInput.value);
   const unit = elements.scaleUnitSelect.value;
+  const pendingPixels = state.pendingScalePixels;
 
   if (isNaN(length) || length <= 0) {
     setStatus("请输入有效的真实长度值。", "error");
@@ -1012,17 +1024,20 @@ function confirmScale() {
 
   state.scale = {
     enabled: true,
-    pixels: state.pendingScalePixels,
+    pixels: pendingPixels,
     realLength: length,
     unit: unit,
-    pixelPerUnit: state.pendingScalePixels / length,
+    pixelPerUnit: pendingPixels / length,
   };
 
-  hideScaleModal();
+  if (elements.scaleModalOverlay) {
+    elements.scaleModalOverlay.classList.add("hidden");
+  }
+  resetScaleState();
   updateScalePanel();
   renderAnnotationList();
   drawScene();
-  setStatus(`比例标定已设置：${Math.round(state.pendingScalePixels)} px = ${formatRealLength(length, unit)}`);
+  setStatus(`比例标定已设置：${Math.round(pendingPixels)} px = ${formatRealLength(length, unit)}`);
 }
 
 function updateToolButtons() {
@@ -1454,20 +1469,36 @@ function loadImage(file) {
   });
 }
 
+function drawLabelToContext(targetContext, x, y, label, canvasWidth, canvasHeight) {
+  const safeX = Math.max(12, Math.min(x, canvasWidth - 220));
+  const safeY = Math.max(12, Math.min(y, canvasHeight - 36));
+  targetContext.font = '600 13px "Aptos", "Segoe UI Variable Text", sans-serif';
+  const textWidth = targetContext.measureText(label).width;
+  targetContext.fillStyle = "rgba(10, 16, 19, 0.86)";
+  targetContext.fillRect(safeX, safeY, textWidth + 18, 24);
+  targetContext.fillStyle = "#fff3e8";
+  targetContext.fillText(label, safeX + 9, safeY + 17);
+}
+
 function drawToCanvas(targetContext) {
   if (!state.image) {
     return;
   }
 
   targetContext.drawImage(state.image, 0, 0);
+  const canvasWidth = state.image.width;
+  const canvasHeight = state.image.height;
 
   state.annotations.forEach((annotation) => {
+    const label = getAnnotationLabel(annotation);
+
     if (annotation.type === "rectangle") {
       targetContext.lineWidth = 3;
       targetContext.strokeStyle = "#ff8f62";
       targetContext.fillStyle = "rgba(255, 143, 98, 0.18)";
       targetContext.strokeRect(annotation.x, annotation.y, annotation.width, annotation.height);
       targetContext.fillRect(annotation.x, annotation.y, annotation.width, annotation.height);
+      drawLabelToContext(targetContext, annotation.x, Math.max(0, annotation.y - 28), label, canvasWidth, canvasHeight);
       return;
     }
 
@@ -1490,12 +1521,16 @@ function drawToCanvas(targetContext) {
       targetContext.fillStyle = "rgba(138, 227, 95, 0.22)";
       targetContext.fill();
       targetContext.stroke();
+      const centroid = getPolygonCentroid(annotation.points);
+      drawLabelToContext(targetContext, centroid.x - 36, Math.max(0, centroid.y - 18), label, canvasWidth, canvasHeight);
       return;
     }
 
     targetContext.lineWidth = annotation.type === "brush" ? 3 : 3;
     targetContext.strokeStyle = annotation.type === "brush" ? "#ff6b9d" : "#55d5ff";
     targetContext.stroke();
+    const centroid = getPolygonCentroid(annotation.points);
+    drawLabelToContext(targetContext, centroid.x - 36, Math.max(0, centroid.y - 18), label, canvasWidth, canvasHeight);
   });
 }
 
@@ -2346,6 +2381,24 @@ document.addEventListener("keydown", (event) => {
       state.linePoints.pop();
       drawScene();
       setStatus(`已撤销一个折线点，剩余 ${state.linePoints.length} 个。`);
+    }
+  }
+
+  if (state.currentTool === "scale") {
+    if (event.key === "Escape") {
+      resetScaleState();
+      drawScene();
+      setStatus("已取消当前比例标定绘制。");
+    } else if (event.key === "Backspace" && state.scaleLinePoints.length) {
+      event.preventDefault();
+      state.scaleLinePoints.pop();
+      state.scaleDraft = null;
+      drawScene();
+      if (state.scaleLinePoints.length === 0) {
+        setStatus("已撤销标定起点，请重新点击添加起点。");
+      } else {
+        setStatus(`已撤销标定点，剩余 ${state.scaleLinePoints.length} 个。点击添加终点完成参考线绘制。`);
+      }
     }
   }
 });
