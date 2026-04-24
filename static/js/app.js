@@ -930,12 +930,11 @@ function updateScalePanel() {
     return;
   }
 
-  if (state.currentTool === "scale") {
+  const shouldShow = state.currentTool === "scale" || state.scale.enabled;
+  if (shouldShow) {
     elements.scalePanel.classList.remove("hidden");
   } else {
-    if (!state.scale.enabled) {
-      elements.scalePanel.classList.add("hidden");
-    }
+    elements.scalePanel.classList.add("hidden");
   }
 
   if (state.scale.enabled) {
@@ -945,8 +944,10 @@ function updateScalePanel() {
     elements.scaleReal.textContent = formatRealLength(state.scale.realLength, state.scale.unit);
     
     let ratioDisplay;
-    if (state.scale.pixelPerUnit < 1) {
-      ratioDisplay = state.scale.pixelPerUnit.toFixed(2);
+    if (state.scale.pixelPerUnit < 0.01) {
+      ratioDisplay = state.scale.pixelPerUnit.toFixed(6);
+    } else if (state.scale.pixelPerUnit < 1) {
+      ratioDisplay = state.scale.pixelPerUnit.toFixed(4);
     } else if (state.scale.pixelPerUnit >= 1000) {
       ratioDisplay = state.scale.pixelPerUnit.toFixed(0);
     } else if (state.scale.pixelPerUnit >= 100) {
