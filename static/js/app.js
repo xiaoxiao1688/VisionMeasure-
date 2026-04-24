@@ -348,6 +348,15 @@ function updateTemplate(templateId, updates) {
   if (index === -1) {
     return false;
   }
+  
+  if (updates.isDefault === true) {
+    templatesState.templates.forEach((t, i) => {
+      if (i !== index) {
+        t.isDefault = false;
+      }
+    });
+  }
+  
   Object.assign(templatesState.templates[index], updates);
   renderTemplateList();
   saveTemplatesToCurrentTask();
@@ -438,6 +447,11 @@ function getAnnotationCategoryColor(annotation) {
     polygon: "#8ae35f",
     brush: "#ff6b9d",
   };
+  
+  if (annotation.color) {
+    return annotation.color;
+  }
+  
   if (annotation.categoryId) {
     const template = getActiveTemplate();
     if (template) {
@@ -447,7 +461,8 @@ function getAnnotationCategoryColor(annotation) {
       }
     }
   }
-  return annotation.color || defaultColors[annotation.type] || "#ff8f62";
+  
+  return defaultColors[annotation.type] || "#ff8f62";
 }
 
 function getCategoryColorForShape(shapeType) {
@@ -547,6 +562,9 @@ function getAnnotationCategory(annotation) {
 }
 
 function shouldShowMeasurements(annotation) {
+  if (annotation && annotation.showMeasurements !== undefined && annotation.showMeasurements !== null) {
+    return annotation.showMeasurements;
+  }
   const category = getAnnotationCategory(annotation);
   if (category) {
     return category.showMeasurements;
@@ -555,6 +573,9 @@ function shouldShowMeasurements(annotation) {
 }
 
 function shouldIncludeInExport(annotation) {
+  if (annotation && annotation.exportIncluded !== undefined && annotation.exportIncluded !== null) {
+    return annotation.exportIncluded;
+  }
   const category = getAnnotationCategory(annotation);
   if (category) {
     return category.exportIncluded;
@@ -621,6 +642,21 @@ function loadTemplatesFromStorage() {
       const data = JSON.parse(stored);
       if (data.templates && Array.isArray(data.templates)) {
         templatesState.templates = normalizeLoadedTemplates(data.templates);
+        
+        let defaultCount = templatesState.templates.filter((t) => t.isDefault).length;
+        if (defaultCount > 1) {
+          let foundFirstDefault = false;
+          templatesState.templates.forEach((t) => {
+            if (t.isDefault) {
+              if (foundFirstDefault) {
+                t.isDefault = false;
+              } else {
+                foundFirstDefault = true;
+              }
+            }
+          });
+        }
+        
         if (data.activeTemplateId) {
           const template = templatesState.templates.find((t) => t.id === data.activeTemplateId);
           if (template) {
@@ -1821,6 +1857,8 @@ function normalizeRectangle(start, end) {
     name: "",
     categoryId: activeCategory && activeCategory.shapeType === "rectangle" ? activeCategory.id : null,
     color: activeCategory && activeCategory.shapeType === "rectangle" ? activeCategory.color : "#ff8f62",
+    showMeasurements: activeCategory && activeCategory.shapeType === "rectangle" ? activeCategory.showMeasurements : true,
+    exportIncluded: activeCategory && activeCategory.shapeType === "rectangle" ? activeCategory.exportIncluded : true,
     x,
     y,
     width,
@@ -1844,6 +1882,8 @@ function createLineAnnotation(points) {
     name: "",
     categoryId: activeCategory && activeCategory.shapeType === "line" ? activeCategory.id : null,
     color: activeCategory && activeCategory.shapeType === "line" ? activeCategory.color : "#55d5ff",
+    showMeasurements: activeCategory && activeCategory.shapeType === "line" ? activeCategory.showMeasurements : true,
+    exportIncluded: activeCategory && activeCategory.shapeType === "line" ? activeCategory.exportIncluded : true,
     points,
     length: getPolylineLength(points),
   };
@@ -1864,6 +1904,8 @@ function createPolygonAnnotation(points) {
     name: "",
     categoryId: activeCategory && activeCategory.shapeType === "polygon" ? activeCategory.id : null,
     color: activeCategory && activeCategory.shapeType === "polygon" ? activeCategory.color : "#8ae35f",
+    showMeasurements: activeCategory && activeCategory.shapeType === "polygon" ? activeCategory.showMeasurements : true,
+    exportIncluded: activeCategory && activeCategory.shapeType === "polygon" ? activeCategory.exportIncluded : true,
     points,
     area: getPolygonArea(points),
     perimeter: getPolygonPerimeter(points),
@@ -1885,6 +1927,8 @@ function createBrushAnnotation(points) {
     name: "",
     categoryId: activeCategory && activeCategory.shapeType === "brush" ? activeCategory.id : null,
     color: activeCategory && activeCategory.shapeType === "brush" ? activeCategory.color : "#ff6b9d",
+    showMeasurements: activeCategory && activeCategory.shapeType === "brush" ? activeCategory.showMeasurements : true,
+    exportIncluded: activeCategory && activeCategory.shapeType === "brush" ? activeCategory.exportIncluded : true,
     points,
     length: getPolylineLength(points),
   };
@@ -2512,6 +2556,13 @@ function normalizeLoadedAnnotation(annotation) {
     color: annotation.color || null,
   };
 
+  if (annotation.showMeasurements !== undefined && annotation.showMeasurements !== null) {
+    normalized.showMeasurements = Boolean(annotation.showMeasurements);
+  }
+  if (annotation.exportIncluded !== undefined && annotation.exportIncluded !== null) {
+    normalized.exportIncluded = Boolean(annotation.exportIncluded);
+  }
+
   if (normalized.type === "rectangle") {
     const x = Number(annotation.x);
     const y = Number(annotation.y);
@@ -3016,6 +3067,8 @@ function serializeAnnotations() {
     name: annotation.name || "",
     categoryId: annotation.categoryId || null,
     color: annotation.color || null,
+    showMeasurements: annotation.showMeasurements !== undefined ? annotation.showMeasurements : undefined,
+    exportIncluded: annotation.exportIncluded !== undefined ? annotation.exportIncluded : undefined,
     x: annotation.x !== undefined ? Number(annotation.x.toFixed(2)) : undefined,
     y: annotation.y !== undefined ? Number(annotation.y.toFixed(2)) : undefined,
     width: annotation.width !== undefined ? Number(annotation.width.toFixed(2)) : undefined,
