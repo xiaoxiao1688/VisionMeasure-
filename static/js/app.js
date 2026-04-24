@@ -525,6 +525,143 @@ function serializeTemplates() {
   };
 }
 
+function getTemplateById(templateId) {
+  return templatesState.templates.find((t) => t.id === templateId) || null;
+}
+
+function getCategoryById(categoryId) {
+  for (const template of templatesState.templates) {
+    const category = template.categories.find((c) => c.id === categoryId);
+    if (category) {
+      return category;
+    }
+  }
+  return null;
+}
+
+function getAnnotationCategory(annotation) {
+  if (!annotation || !annotation.categoryId) {
+    return null;
+  }
+  return getCategoryById(annotation.categoryId);
+}
+
+function shouldShowMeasurements(annotation) {
+  const category = getAnnotationCategory(annotation);
+  if (category) {
+    return category.showMeasurements;
+  }
+  return true;
+}
+
+function shouldIncludeInExport(annotation) {
+  const category = getAnnotationCategory(annotation);
+  if (category) {
+    return category.exportIncluded;
+  }
+  return true;
+}
+
+function getActiveTemplates() {
+  return templatesState.templates;
+}
+
+function getActiveCategories() {
+  const template = getActiveTemplate();
+  return template ? template.categories : [];
+}
+
+function getActiveTemplateId() {
+  if (!templatesState.activeTemplateId && templatesState.templates.length > 0) {
+    templatesState.activeTemplateId = templatesState.templates[0].id;
+  }
+  return templatesState.activeTemplateId;
+}
+
+function getActiveCategoryId() {
+  return templatesState.activeCategoryId;
+}
+
+function createTemplate(name, isDefault = false) {
+  const template = createEmptyTemplate();
+  template.name = name || "新模板";
+  template.isDefault = isDefault;
+  
+  if (isDefault) {
+    templatesState.templates.forEach((t) => {
+      t.isDefault = false;
+    });
+  }
+  
+  return template;
+}
+
+function createCategory(name, color, shapeType = "rectangle") {
+  const category = createEmptyCategory();
+  category.name = name || "新类别";
+  category.color = color || presetColors[0];
+  category.shapeType = shapeType;
+  return category;
+}
+
+function saveTemplatesToStorage() {
+  try {
+    const data = serializeTemplates();
+    localStorage.setItem("geodraft_templates", JSON.stringify(data));
+    saveTemplatesToCurrentTask();
+  } catch (error) {
+    console.error("Failed to save templates to storage:", error);
+  }
+}
+
+function loadTemplatesFromStorage() {
+  try {
+    const stored = localStorage.getItem("geodraft_templates");
+    if (stored) {
+      const data = JSON.parse(stored);
+      if (data.templates && Array.isArray(data.templates)) {
+        templatesState.templates = normalizeLoadedTemplates(data.templates);
+        if (data.activeTemplateId) {
+          const template = templatesState.templates.find((t) => t.id === data.activeTemplateId);
+          if (template) {
+            templatesState.activeTemplateId = data.activeTemplateId;
+            if (data.activeCategoryId) {
+              const category = template.categories.find((c) => c.id === data.activeCategoryId);
+              templatesState.activeCategoryId = category ? data.activeCategoryId : null;
+            } else {
+              templatesState.activeCategoryId = template.categories.length > 0 ? template.categories[0].id : null;
+            }
+          }
+        }
+      }
+    }
+    
+    if (!templatesState.activeTemplateId && templatesState.templates.length > 0) {
+      let defaultTemplate = templatesState.templates.find((t) => t.isDefault);
+      if (!defaultTemplate) {
+        defaultTemplate = templatesState.templates[0];
+      }
+      templatesState.activeTemplateId = defaultTemplate.id;
+      templatesState.activeCategoryId = defaultTemplate.categories.length > 0 ? defaultTemplate.categories[0].id : null;
+    }
+  } catch (error) {
+    console.error("Failed to load templates from storage:", error);
+    templatesState.templates = generateDefaultTemplates();
+    if (templatesState.templates.length > 0) {
+      templatesState.activeTemplateId = templatesState.templates[0].id;
+      templatesState.activeCategoryId = templatesState.templates[0].categories.length > 0 ? templatesState.templates[0].categories[0].id : null;
+    }
+  }
+}
+
+function removeTemplate(templateId) {
+  return deleteTemplate(templateId);
+}
+
+function removeCategory(templateId, categoryId) {
+  return deleteCategory(templateId, categoryId);
+}
+
 const session = {
   isBatchSession: false,
   batchId: null,
@@ -1865,7 +2002,13 @@ function hasActiveScale() {
 }
 
 function getAnnotationLabel(annotation) {
-  const prefix = annotation.name ? `${annotation.name} · ` : "";
+  const prefix = annotation.name ? `${annotation.name}` : "";
+  const showMeasurements = shouldShowMeasurements(annotation);
+  
+  if (!showMeasurements) {
+    return prefix || getShapeTypeLabel(annotation.type);
+  }
+
   const scaleEnabled = hasActiveScale();
   const unit = getUnitLabel(state.scale.unit);
 
@@ -1874,9 +2017,9 @@ function getAnnotationLabel(annotation) {
     if (scaleEnabled) {
       const realLength = getRealLength(annotation.length);
       const realLabel = formatRealLength(realLength, unit);
-      return `${prefix}折线 ${pixelLabel} / ${realLabel}`;
+      return prefix ? `${prefix} · ${pixelLabel} / ${realLabel}` : `折线 ${pixelLabel} / ${realLabel}`;
     }
-    return `${prefix}折线 ${pixelLabel}`;
+    return prefix ? `${prefix} · ${pixelLabel}` : `折线 ${pixelLabel}`;
   }
 
   if (annotation.type === "polygon") {
@@ -1884,9 +2027,9 @@ function getAnnotationLabel(annotation) {
     if (scaleEnabled) {
       const realArea = getRealArea(annotation.area);
       const realLabel = formatRealArea(realArea, unit);
-      return `${prefix}多边形 ${pixelLabel} / ${realLabel}`;
+      return prefix ? `${prefix} · ${pixelLabel} / ${realLabel}` : `多边形 ${pixelLabel} / ${realLabel}`;
     }
-    return `${prefix}多边形 ${pixelLabel}`;
+    return prefix ? `${prefix} · ${pixelLabel}` : `多边形 ${pixelLabel}`;
   }
 
   if (annotation.type === "brush") {
@@ -1894,9 +2037,9 @@ function getAnnotationLabel(annotation) {
     if (scaleEnabled) {
       const realLength = getRealLength(annotation.length);
       const realLabel = formatRealLength(realLength, unit);
-      return `${prefix}画笔 ${pixelLabel} / ${realLabel}`;
+      return prefix ? `${prefix} · ${pixelLabel} / ${realLabel}` : `画笔 ${pixelLabel} / ${realLabel}`;
     }
-    return `${prefix}画笔 ${pixelLabel}`;
+    return prefix ? `${prefix} · ${pixelLabel}` : `画笔 ${pixelLabel}`;
   }
 
   const pixelLabel = `${Math.round(annotation.width)} × ${Math.round(annotation.height)} px`;
@@ -1904,9 +2047,9 @@ function getAnnotationLabel(annotation) {
     const realWidth = getRealLength(annotation.width);
     const realHeight = getRealLength(annotation.height);
     const realLabel = `${formatRealLength(realWidth, unit)} × ${formatRealLength(realHeight, unit)}`;
-    return `${prefix}${pixelLabel} / ${realLabel}`;
+    return prefix ? `${prefix} · ${pixelLabel} / ${realLabel}` : pixelLabel;
   }
-  return `${prefix}${pixelLabel}`;
+  return prefix ? `${prefix} · ${pixelLabel}` : pixelLabel;
 }
 
 function getAnnotationSummary(annotation) {
@@ -2739,12 +2882,18 @@ function drawToCanvas(targetContext) {
   const canvasHeight = state.image.height;
 
   state.annotations.forEach((annotation) => {
+    if (!shouldIncludeInExport(annotation)) {
+      return;
+    }
+
+    const categoryColor = getAnnotationCategoryColor(annotation);
     const label = getAnnotationLabel(annotation);
 
     if (annotation.type === "rectangle") {
+      const selectedColor = lightenColor(categoryColor, 20);
       targetContext.lineWidth = 3;
-      targetContext.strokeStyle = "#ff8f62";
-      targetContext.fillStyle = "rgba(255, 143, 98, 0.18)";
+      targetContext.strokeStyle = categoryColor;
+      targetContext.fillStyle = rgbaFromHex(categoryColor, 0.18);
       targetContext.strokeRect(annotation.x, annotation.y, annotation.width, annotation.height);
       targetContext.fillRect(annotation.x, annotation.y, annotation.width, annotation.height);
       drawLabelToContext(targetContext, annotation.x, Math.max(0, annotation.y - 28), label, canvasWidth, canvasHeight);
@@ -2764,10 +2913,11 @@ function drawToCanvas(targetContext) {
     }
 
     if (annotation.type === "polygon") {
+      const selectedColor = lightenColor(categoryColor, 20);
       targetContext.closePath();
       targetContext.lineWidth = 3;
-      targetContext.strokeStyle = "#8ae35f";
-      targetContext.fillStyle = "rgba(138, 227, 95, 0.22)";
+      targetContext.strokeStyle = categoryColor;
+      targetContext.fillStyle = rgbaFromHex(categoryColor, 0.22);
       targetContext.fill();
       targetContext.stroke();
       const centroid = getPolygonCentroid(annotation.points);
@@ -2775,8 +2925,8 @@ function drawToCanvas(targetContext) {
       return;
     }
 
-    targetContext.lineWidth = annotation.type === "brush" ? 3 : 3;
-    targetContext.strokeStyle = annotation.type === "brush" ? "#ff6b9d" : "#55d5ff";
+    targetContext.lineWidth = 3;
+    targetContext.strokeStyle = categoryColor;
     targetContext.stroke();
     const centroid = getPolygonCentroid(annotation.points);
     drawLabelToContext(targetContext, centroid.x - 36, Math.max(0, centroid.y - 18), label, canvasWidth, canvasHeight);
@@ -4320,28 +4470,23 @@ function deleteCurrentTemplate() {
 }
 
 function selectTemplate(templateId) {
-  if (getCurrentTask()) {
-    const task = getCurrentTask();
-    task.activeTemplateId = templateId;
-    task.activeCategoryId = null;
-  } else {
-    templatesState.activeTemplateId = templateId;
-    templatesState.activeCategoryId = null;
+  if (setActiveTemplate(templateId)) {
+    saveTemplatesToStorage();
+    const template = getActiveTemplate();
+    if (template) {
+      setStatus(`已切换到模板：${template.name}`);
+    }
   }
-  renderTemplateList();
-  renderCategoryList();
-  saveTemplatesToStorage();
 }
 
 function selectCategory(categoryId) {
-  if (getCurrentTask()) {
-    const task = getCurrentTask();
-    task.activeCategoryId = categoryId;
-  } else {
-    templatesState.activeCategoryId = categoryId;
+  if (setActiveCategory(categoryId)) {
+    saveTemplatesToStorage();
+    const category = getCategoryById(categoryId);
+    if (category) {
+      setStatus(`已选择类别：${category.name}`);
+    }
   }
-  renderCategoryList();
-  saveTemplatesToStorage();
 }
 
 function deleteCategoryFromUI(categoryId) {
