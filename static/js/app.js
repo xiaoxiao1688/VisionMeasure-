@@ -132,287 +132,114 @@ const state = {
   pendingScalePixels: 0,
 };
 
-const batchState = {
-  enabled: false,
-  tasks: [],
-  currentIndex: -1,
-  taskStates: {},
+const session = {
+  isBatchSession: false,
+  batchId: null,
+  batchName: null,
   shareScale: false,
   sharedScale: null,
-  applyProjectToAll: false,
+  currentTaskIndex: 0,
+  tasks: [],
 };
 
-function createTaskSnapshot() {
+function createTaskFromFile(file) {
   return {
-    annotations: structuredClone(state.annotations),
-    selectedId: state.selectedId,
-    undoStack: structuredClone(state.undoStack),
-    scale: structuredClone(state.scale),
-    imageOffset: { ...state.imageOffset },
-    displayMode: state.displayMode,
-    originalImageDataUrl: state.originalImageDataUrl,
-    currentTool: state.currentTool,
-    saved: false,
-    savedPrefix: null,
-    annotationCount: state.annotations.length,
-  };
-}
-
-function restoreTaskFromSnapshot(snapshot) {
-  if (!snapshot) {
-    return;
-  }
-
-  state.annotations = structuredClone(snapshot.annotations);
-  state.selectedId = snapshot.selectedId;
-  state.undoStack = structuredClone(snapshot.undoStack);
-  state.imageOffset = { ...snapshot.imageOffset };
-  state.displayMode = snapshot.displayMode;
-  state.originalImageDataUrl = snapshot.originalImageDataUrl;
-  state.currentTool = snapshot.currentTool;
-
-  if (batchState.shareScale && batchState.sharedScale) {
-    state.scale = structuredClone(batchState.sharedScale);
-  } else {
-    state.scale = structuredClone(snapshot.scale);
-  }
-
-  resetDraftState();
-  resetScaleState();
-  resetEditState();
-}
-
-function startBatchMode(files) {
-  if (!files || files.length === 0) {
-    return;
-  }
-
-  const imageFiles = Array.from(files).filter((file) => file.type.startsWith("image/"));
-
-  if (imageFiles.length === 0) {
-    setStatus("没有选择有效的图片文件。", "error");
-    return;
-  }
-
-  batchState.tasks = imageFiles.map((file, index) => ({
-    id: crypto.randomUUID(),
-    file: file,
+    taskId: crypto.randomUUID(),
     fileName: file.name,
+    imageFile: file,
     imageDataUrl: null,
     imageMeta: null,
     loaded: false,
-  }));
+    annotations: [],
+    selectedId: null,
+    undoStack: [],
+    imageOffset: { x: 0, y: 0 },
+    displayMode: "fit",
+    scale: createDefaultScaleState(),
+    saved: false,
+    savedPrefix: null,
+    savedAt: null,
+  };
+}
 
-  batchState.currentIndex = 0;
-  batchState.taskStates = {};
-  batchState.enabled = true;
-  batchState.shareScale = elements.shareScale ? elements.shareScale.checked : false;
-  batchState.applyProjectToAll = elements.applyProjectToAll ? elements.applyProjectToAll.checked : false;
-  batchState.sharedScale = null;
+function syncStateFromTask(task) {
+  if (!task) {
+    return;
+  }
 
-  if (elements.batchPanel) {
+  state.annotations = structuredClone(task.annotations);
+  state.selectedId = task.selectedId;
+  state.undoStack = structuredClone(task.undoStack);
+  state.imageOffset = { ...task.imageOffset };
+  state.displayMode = task.displayMode;
+  state.scale = session.shareScale && session.sharedScale 
+    ? structuredClone(session.sharedScale) 
+    : structuredClone(task.scale);
+  state.currentSessionPrefix = task.savedPrefix;
+}
+
+function syncTaskFromState(task) {
+  if (!task) {
+    return;
+  }
+
+  task.annotations = structuredClone(state.annotations);
+  task.selectedId = state.selectedId;
+  task.undoStack = structuredClone(state.undoStack);
+  task.imageOffset = { ...state.imageOffset };
+  task.displayMode = state.displayMode;
+  
+  if (!session.shareScale) {
+    task.scale = structuredClone(state.scale);
+  }
+  
+  task.savedPrefix = state.currentSessionPrefix;
+}
+
+function getCurrentTask() {
+  if (session.currentTaskIndex < 0 || session.currentTaskIndex >= session.tasks.length) {
+    return null;
+  }
+  return session.tasks[session.currentTaskIndex];
+}
+
+function updateBatchUI() {
+  if (!elements.batchPanel) {
+    return;
+  }
+
+  if (session.isBatchSession && session.tasks.length > 0) {
     elements.batchPanel.classList.remove("hidden");
+  } else {
+    elements.batchPanel.classList.add("hidden");
   }
 
-  loadBatchTask(0);
-  setStatus(`已进入批量模式，共 ${batchState.tasks.length} 张图片。`);
-}
-
-function saveCurrentTaskState() {
-  if (!batchState.enabled || batchState.currentIndex < 0) {
-    return;
+  if (elements.batchCurrentIndex) {
+    elements.batchCurrentIndex.textContent = session.currentTaskIndex >= 0 ? session.currentTaskIndex + 1 : 0;
+  }
+  if (elements.batchTotal) {
+    elements.batchTotal.textContent = session.tasks.length;
   }
 
-  const currentTask = batchState.tasks[batchState.currentIndex];
-  if (!currentTask) {
-    return;
+  if (elements.batchPrev) {
+    elements.batchPrev.disabled = session.currentTaskIndex <= 0;
+  }
+  if (elements.batchNext) {
+    elements.batchNext.disabled = session.currentTaskIndex >= session.tasks.length - 1;
   }
 
-  const snapshot = createTaskSnapshot();
-  const existingState = batchState.taskStates[currentTask.id];
-  if (existingState) {
-    snapshot.saved = existingState.saved;
-    snapshot.savedPrefix = existingState.savedPrefix;
-    snapshot.annotationCount = existingState.annotationCount;
-  }
-
-  batchState.taskStates[currentTask.id] = snapshot;
-}
-
-function loadBatchTask(index) {
-  if (!batchState.enabled || index < 0 || index >= batchState.tasks.length) {
-    return;
-  }
-
-  if (batchState.currentIndex >= 0) {
-    saveCurrentTaskState();
-  }
-
-  const targetTask = batchState.tasks[index];
-  batchState.currentIndex = index;
-
-  const taskState = batchState.taskStates[targetTask.id];
-
-  if (targetTask.loaded && taskState) {
-    restoreTaskFromSnapshot(taskState);
-    loadImageFromSource(targetTask.imageDataUrl, targetTask.fileName, {
-      imageFile: targetTask.file,
-      preserveAnnotations: true,
-      afterLoad: () => {
-        renderAnnotationList();
-        updateAnnotationNameEditor();
-        updateDisplayModeButtons();
-        updateImagePositionDisplay();
-        updateToolButtons();
-        updateScalePanel();
-        refreshOverlay();
-        computeImagePlacement();
-        drawScene();
-        updateBatchNavigation();
-        renderBatchTaskList();
-        setStatus(`当前图片：${targetTask.fileName} (${index + 1}/${batchState.tasks.length})`);
-      },
-    });
-    return;
-  }
-
-  const reader = new FileReader();
-  reader.onload = () => {
-    targetTask.imageDataUrl = reader.result;
-    targetTask.loaded = true;
-
-    const image = new Image();
-    image.onload = () => {
-      targetTask.imageMeta = {
-        name: targetTask.fileName,
-        width: image.width,
-        height: image.height,
-      };
-
-      if (taskState) {
-        restoreTaskFromSnapshot(taskState);
-      } else {
-        state.annotations = [];
-        state.selectedId = null;
-        state.undoStack = [];
-        state.imageOffset = { x: 0, y: 0 };
-        state.displayMode = "fit";
-        state.originalImageDataUrl = null;
-
-        if (batchState.shareScale && batchState.sharedScale) {
-          state.scale = structuredClone(batchState.sharedScale);
-        } else {
-          state.scale = createDefaultScaleState();
-        }
-
-        if (batchState.applyProjectToAll) {
-          const firstState = Object.values(batchState.taskStates)[0];
-          if (firstState && firstState.scale && firstState.scale.enabled) {
-          }
-        }
-
-        resetDraftState();
-        resetScaleState();
-        resetEditState();
-      }
-
-      loadImageFromSource(targetTask.imageDataUrl, targetTask.fileName, {
-        imageFile: targetTask.file,
-        preserveAnnotations: true,
-        afterLoad: () => {
-          const newSnapshot = createTaskSnapshot();
-          if (!batchState.taskStates[targetTask.id]) {
-            batchState.taskStates[targetTask.id] = newSnapshot;
-          }
-
-          renderAnnotationList();
-          updateAnnotationNameEditor();
-          updateDisplayModeButtons();
-          updateImagePositionDisplay();
-          updateToolButtons();
-          updateScalePanel();
-          refreshOverlay();
-          computeImagePlacement();
-          drawScene();
-          updateBatchNavigation();
-          renderBatchTaskList();
-          setStatus(`当前图片：${targetTask.fileName} (${index + 1}/${batchState.tasks.length})`);
-        },
-      });
-    };
-    image.onerror = () => {
-      setStatus(`图片加载失败：${targetTask.fileName}`, "error");
-    };
-    image.src = reader.result;
-  };
-  reader.onerror = () => {
-    setStatus(`读取图片失败：${targetTask.fileName}`, "error");
-  };
-  reader.readAsDataURL(targetTask.file);
-}
-
-function switchToTask(index) {
-  if (!batchState.enabled) {
-    return;
-  }
-
-  if (index === batchState.currentIndex) {
-    return;
-  }
-
-  const currentTask = batchState.tasks[batchState.currentIndex];
-  const currentState = batchState.taskStates[currentTask.id];
-  const hasUnsaved = currentState && !currentState.saved && state.annotations.length > 0;
-
-  if (hasUnsaved) {
-    const confirmMessage = `当前图片“${currentTask.fileName}”有未保存的标注，是否继续切换？\n\n点击“确定”继续切换（未保存的更改会保留在任务中），点击“取消”留在当前页面。`;
-    if (!window.confirm(confirmMessage)) {
-      return;
-    }
-  }
-
-  loadBatchTask(index);
-}
-
-function goToPrevTask() {
-  if (!batchState.enabled || batchState.currentIndex <= 0) {
-    return;
-  }
-  switchToTask(batchState.currentIndex - 1);
-}
-
-function goToNextTask() {
-  if (!batchState.enabled || batchState.currentIndex >= batchState.tasks.length - 1) {
-    return;
-  }
-  switchToTask(batchState.currentIndex + 1);
-}
-
-function updateBatchNavigation() {
-  if (!elements.batchCurrentIndex || !elements.batchTotal || !elements.batchPrev || !elements.batchNext) {
-    return;
-  }
-
-  elements.batchCurrentIndex.textContent = batchState.currentIndex >= 0 ? batchState.currentIndex + 1 : 0;
-  elements.batchTotal.textContent = batchState.tasks.length;
-
-  elements.batchPrev.disabled = batchState.currentIndex <= 0;
-  elements.batchNext.disabled = batchState.currentIndex >= batchState.tasks.length - 1;
-
+  const completedCount = session.tasks.filter((t) => t.saved).length;
   if (elements.batchProgress) {
-    const completedCount = batchState.tasks.filter((task) => {
-      const taskState = batchState.taskStates[task.id];
-      return taskState && taskState.saved;
-    }).length;
-    elements.batchProgress.textContent = `已完成 ${completedCount}/${batchState.tasks.length} 张`;
+    elements.batchProgress.textContent = session.isBatchSession 
+      ? `已完成 ${completedCount}/${session.tasks.length} 张` 
+      : "支持 PNG、JPG、JPEG、WebP、BMP";
+  }
+  if (elements.batchCompleted) {
+    elements.batchCompleted.textContent = `已完成 ${completedCount} 张`;
   }
 
-  if (elements.batchCompleted) {
-    const completedCount = batchState.tasks.filter((task) => {
-      const taskState = batchState.taskStates[task.id];
-      return taskState && taskState.saved;
-    }).length;
-    elements.batchCompleted.textContent = `已完成 ${completedCount} 张`;
+  if (elements.shareScale) {
+    elements.shareScale.checked = session.shareScale;
   }
 }
 
@@ -421,26 +248,23 @@ function renderBatchTaskList() {
     return;
   }
 
-  if (batchState.tasks.length === 0) {
+  if (!session.isBatchSession || session.tasks.length === 0) {
     elements.batchTaskList.innerHTML = '<li class="empty-state">暂无批量任务</li>';
     return;
   }
 
-  elements.batchTaskList.innerHTML = batchState.tasks
+  elements.batchTaskList.innerHTML = session.tasks
     .map((task, index) => {
-      const taskState = batchState.taskStates[task.id];
-      const isActive = index === batchState.currentIndex;
-      const isSaved = taskState && taskState.saved;
-      const hasAnnotations = taskState && taskState.annotationCount > 0;
-      const annotationCount = taskState ? taskState.annotationCount : 0;
+      const isActive = index === session.currentTaskIndex;
+      const annotationCount = task.annotations.length;
 
       let statusIcon = "pending";
       let statusText = "待处理";
 
-      if (isSaved) {
+      if (task.saved) {
         statusIcon = "saved";
         statusText = "已保存";
-      } else if (hasAnnotations) {
+      } else if (annotationCount > 0) {
         statusIcon = "unsaved";
         statusText = `${annotationCount} 个标注`;
       }
@@ -467,79 +291,229 @@ function renderBatchTaskList() {
       `;
     })
     .join("");
-
-  updateBatchNavigation();
 }
 
-function exitBatchMode() {
-  if (!batchState.enabled) {
+function hasUnsavedChanges() {
+  const currentTask = getCurrentTask();
+  if (!currentTask) {
+    return state.annotations.length > 0 && !state.currentSessionPrefix;
+  }
+  return !currentTask.saved && currentTask.annotations.length > 0;
+}
+
+function hasAnyUnsavedChanges() {
+  if (!session.isBatchSession) {
+    return hasUnsavedChanges();
+  }
+  return session.tasks.some((task) => !task.saved && task.annotations.length > 0);
+}
+
+
+
+function loadTaskAtIndex(index) {
+  if (index < 0 || index >= session.tasks.length) {
     return;
   }
 
-  const unsavedTasks = batchState.tasks.filter((task) => {
-    const taskState = batchState.taskStates[task.id];
-    return taskState && !taskState.saved && taskState.annotationCount > 0;
-  });
+  const currentTask = getCurrentTask();
+  if (currentTask) {
+    syncTaskFromState(currentTask);
+  }
 
-  if (unsavedTasks.length > 0) {
-    const confirmMessage = `有 ${unsavedTasks.length} 张图片的标注尚未保存，确定要退出批量模式吗？\n\n退出后未保存的标注将会丢失。`;
+  const targetTask = session.tasks[index];
+  session.currentTaskIndex = index;
+
+  syncStateFromTask(targetTask);
+
+  resetDraftState();
+  resetScaleState();
+  resetEditState();
+
+  if (targetTask.loaded && targetTask.imageDataUrl) {
+    loadImageFromSource(targetTask.imageDataUrl, targetTask.fileName, {
+      imageFile: targetTask.imageFile,
+      preserveAnnotations: true,
+      afterLoad: () => {
+        renderAnnotationList();
+        updateAnnotationNameEditor();
+        updateDisplayModeButtons();
+        updateImagePositionDisplay();
+        updateToolButtons();
+        updateScalePanel();
+        refreshOverlay();
+        computeImagePlacement();
+        drawScene();
+        updateBatchUI();
+        renderBatchTaskList();
+        setStatus(`当前图片：${targetTask.fileName} (${index + 1}/${session.tasks.length})`);
+      },
+    });
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = () => {
+    targetTask.imageDataUrl = reader.result;
+    targetTask.loaded = true;
+
+    const image = new Image();
+    image.onload = () => {
+      targetTask.imageMeta = {
+        name: targetTask.fileName,
+        width: image.width,
+        height: image.height,
+      };
+
+      loadImageFromSource(targetTask.imageDataUrl, targetTask.fileName, {
+        imageFile: targetTask.imageFile,
+        preserveAnnotations: true,
+        afterLoad: () => {
+          renderAnnotationList();
+          updateAnnotationNameEditor();
+          updateDisplayModeButtons();
+          updateImagePositionDisplay();
+          updateToolButtons();
+          updateScalePanel();
+          refreshOverlay();
+          computeImagePlacement();
+          drawScene();
+          updateBatchUI();
+          renderBatchTaskList();
+          setStatus(`当前图片：${targetTask.fileName} (${index + 1}/${session.tasks.length})`);
+        },
+      });
+    };
+    image.onerror = () => {
+      setStatus(`图片加载失败：${targetTask.fileName}`, "error");
+    };
+    image.src = reader.result;
+  };
+  reader.onerror = () => {
+    setStatus(`读取图片失败：${targetTask.fileName}`, "error");
+  };
+  reader.readAsDataURL(targetTask.imageFile);
+}
+
+function switchToTask(index) {
+  if (!session.isBatchSession) {
+    return;
+  }
+
+  if (index === session.currentTaskIndex) {
+    return;
+  }
+
+  const currentTask = getCurrentTask();
+  if (currentTask && !currentTask.saved && state.annotations.length > 0) {
+    const confirmMessage = `当前图片"${currentTask.fileName}"有未保存的标注，是否继续切换？\n\n点击"确定"继续切换（未保存的更改会保留在任务中），点击"取消"留在当前页面。`;
     if (!window.confirm(confirmMessage)) {
       return;
     }
   }
 
-  batchState.enabled = false;
-  batchState.tasks = [];
-  batchState.currentIndex = -1;
-  batchState.taskStates = {};
-  batchState.shareScale = false;
-  batchState.sharedScale = null;
-  batchState.applyProjectToAll = false;
+  loadTaskAtIndex(index);
+}
 
-  if (elements.batchPanel) {
-    elements.batchPanel.classList.add("hidden");
+function goToPrevTask() {
+  if (!session.isBatchSession || session.currentTaskIndex <= 0) {
+    return;
+  }
+  switchToTask(session.currentTaskIndex - 1);
+}
+
+function goToNextTask() {
+  if (!session.isBatchSession || session.currentTaskIndex >= session.tasks.length - 1) {
+    return;
+  }
+  switchToTask(session.currentTaskIndex + 1);
+}
+
+function startBatchSession(files) {
+  if (!files || files.length === 0) {
+    return;
   }
 
+  const imageFiles = Array.from(files).filter((file) => file.type.startsWith("image/"));
+
+  if (imageFiles.length === 0) {
+    setStatus("没有选择有效的图片文件。", "error");
+    return;
+  }
+
+  if (hasAnyUnsavedChanges()) {
+    const confirmMessage = "当前有未保存的标注，确定要开始新的批量任务吗？\n\n未保存的更改将会丢失。";
+    if (!window.confirm(confirmMessage)) {
+      return;
+    }
+  }
+
+  session.isBatchSession = true;
+  session.batchId = crypto.randomUUID();
+  session.batchName = `批量任务 ${new Date().toLocaleString("zh-CN")}`;
+  session.shareScale = elements.shareScale ? elements.shareScale.checked : false;
+  session.sharedScale = null;
+  session.currentTaskIndex = 0;
+  session.tasks = imageFiles.map((file) => createTaskFromFile(file));
+
+  updateBatchUI();
+  loadTaskAtIndex(0);
+  setStatus(`已进入批量模式，共 ${session.tasks.length} 张图片。`);
+}
+
+function exitBatchSession() {
+  if (!session.isBatchSession) {
+    return;
+  }
+
+  if (hasAnyUnsavedChanges()) {
+    const unsavedCount = session.tasks.filter((t) => !t.saved && t.annotations.length > 0).length;
+    const confirmMessage = `有 ${unsavedCount} 张图片的标注尚未保存，确定要退出批量模式吗？\n\n退出后未保存的标注将会丢失。`;
+    if (!window.confirm(confirmMessage)) {
+      return;
+    }
+  }
+
+  session.isBatchSession = false;
+  session.batchId = null;
+  session.batchName = null;
+  session.shareScale = false;
+  session.sharedScale = null;
+  session.currentTaskIndex = 0;
+  session.tasks = [];
+
+  updateBatchUI();
   resetSessionStateForNewImage();
   setStatus("已退出批量模式。");
 }
 
-function markCurrentTaskSaved(filePrefix) {
-  if (!batchState.enabled || batchState.currentIndex < 0) {
-    return;
-  }
-
-  const currentTask = batchState.tasks[batchState.currentIndex];
+function markCurrentTaskAsSaved(filePrefix) {
+  const currentTask = getCurrentTask();
   if (!currentTask) {
     return;
   }
 
-  const taskState = batchState.taskStates[currentTask.id];
-  if (taskState) {
-    taskState.saved = true;
-    taskState.savedPrefix = filePrefix;
-    taskState.annotationCount = state.annotations.length;
-  }
+  syncTaskFromState(currentTask);
+  currentTask.saved = true;
+  currentTask.savedPrefix = filePrefix;
+  currentTask.savedAt = new Date().toISOString();
 
-  if (batchState.shareScale && state.scale.enabled) {
-    batchState.sharedScale = structuredClone(state.scale);
+  if (session.shareScale && state.scale.enabled) {
+    session.sharedScale = structuredClone(state.scale);
   }
 
   renderBatchTaskList();
+  updateBatchUI();
 }
 
-function checkBatchUnsavedChanges() {
-  if (!batchState.enabled) {
-    return false;
-  }
 
-  const unsavedTasks = batchState.tasks.filter((task) => {
-    const taskState = batchState.taskStates[task.id];
-    return taskState && !taskState.saved && taskState.annotationCount > 0;
-  });
 
-  return unsavedTasks.length > 0;
-}
+
+
+
+
+
+
+
 
 const ctx = elements.canvas.getContext("2d");
 const canvasContainer = elements.canvas.parentElement;
@@ -2230,6 +2204,24 @@ async function saveAnnotations() {
     annotatedImage,
   };
 
+  if (session.isBatchSession) {
+    payload.isBatchSession = true;
+    payload.batchId = session.batchId;
+    payload.batchName = session.batchName;
+    payload.taskIndex = session.currentTaskIndex;
+    payload.totalTasks = session.tasks.length;
+    payload.shareScale = session.shareScale;
+    if (session.sharedScale) {
+      payload.sharedScale = {
+        enabled: session.sharedScale.enabled,
+        pixels: Number(session.sharedScale.pixels.toFixed(2)),
+        realLength: Number(session.sharedScale.realLength.toFixed(4)),
+        unit: session.sharedScale.unit,
+        pixelPerUnit: Number(session.sharedScale.pixelPerUnit.toFixed(8)),
+      };
+    }
+  }
+
   try {
     setStatus("正在保存项目...");
     const response = await fetch("/api/annotations", {
@@ -2245,9 +2237,9 @@ async function saveAnnotations() {
 
     await loadHistoryList();
     
-    if (batchState.enabled) {
-      markCurrentTaskSaved(body.filePrefix);
-      setStatus(`已保存 ${state.annotations.length} 个标注到 data/，前缀：${body.filePrefix}。批量任务：${batchState.currentIndex + 1}/${batchState.tasks.length}`);
+    if (session.isBatchSession) {
+      markCurrentTaskAsSaved(body.filePrefix);
+      setStatus(`已保存 ${state.annotations.length} 个标注到 data/，前缀：${body.filePrefix}。批量任务：${session.currentTaskIndex + 1}/${session.tasks.length}`);
     } else {
       setStatus(`已保存 ${state.annotations.length} 个标注到 data/，前缀：${body.filePrefix}`);
     }
@@ -2280,19 +2272,29 @@ function renderHistoryList() {
   }
 
   elements.historyList.innerHTML = state.sessions
-    .map((session) => {
-      const notePreview = session.notes
-        ? `${session.notes.slice(0, 26)}${session.notes.length > 26 ? "..." : ""}`
+    .map((historySession) => {
+      const notePreview = historySession.notes
+        ? `${historySession.notes.slice(0, 26)}${historySession.notes.length > 26 ? "..." : ""}`
         : "无备注";
+      
+      let batchInfoText = "";
+      if (historySession.isBatchSession && historySession.batchInfo) {
+        const taskIndex = historySession.batchInfo.taskIndex;
+        const totalTasks = historySession.batchInfo.totalTasks;
+        if (taskIndex !== undefined && totalTasks !== undefined) {
+          batchInfoText = `批量任务 ${taskIndex + 1}/${totalTasks}`;
+        }
+      }
+
       return `
-        <li class="history-item" data-filename="${session.filePrefix}">
+        <li class="history-item" data-filename="${historySession.filePrefix}">
           <div class="history-item-header">
-            <p class="history-item-title">${escapeHtml(session.projectName)}</p>
+            <p class="history-item-title">${escapeHtml(historySession.projectName)}</p>
             <button
               class="history-delete-button"
               type="button"
-              data-delete-prefix="${session.filePrefix}"
-              aria-label="删除 ${escapeHtml(session.projectName)}"
+              data-delete-prefix="${historySession.filePrefix}"
+              aria-label="删除 ${escapeHtml(historySession.projectName)}"
               title="删除这条历史"
             >
               <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -2308,11 +2310,12 @@ function renderHistoryList() {
             </button>
           </div>
           <p class="history-item-meta">
-            <span>${formatDate(session.savedAt)}</span>
-            <span>${session.annotationCount} 个标注</span>
+            <span>${formatDate(historySession.savedAt)}</span>
+            <span>${historySession.annotationCount} 个标注</span>
+            ${batchInfoText ? `<span>${batchInfoText}</span>` : ""}
           </p>
           <p class="history-item-meta">
-            <span>${escapeHtml(session.imageName || "未记录图片名")}</span>
+            <span>${escapeHtml(historySession.imageName || "未记录图片名")}</span>
             <span>${escapeHtml(notePreview)}</span>
           </p>
         </li>
@@ -3123,7 +3126,7 @@ document.addEventListener("keydown", (event) => {
     return;
   }
 
-  if (batchState.enabled) {
+  if (session.isBatchSession) {
     if (event.key === "ArrowLeft" && !event.ctrlKey && !event.metaKey) {
       event.preventDefault();
       goToPrevTask();
@@ -3140,7 +3143,7 @@ document.addEventListener("keydown", (event) => {
 window.addEventListener("resize", syncCanvasSize);
 
 window.addEventListener("beforeunload", (event) => {
-  if (checkBatchUnsavedChanges()) {
+  if (hasAnyUnsavedChanges()) {
     event.preventDefault();
     event.returnValue = "您有未保存的标注更改，确定要离开吗？";
     return event.returnValue;
@@ -3151,7 +3154,7 @@ if (elements.batchImageLoader) {
   elements.batchImageLoader.addEventListener("change", (event) => {
     const files = event.target.files;
     if (files && files.length > 0) {
-      startBatchMode(files);
+      startBatchSession(files);
     }
     event.target.value = "";
   });
@@ -3171,7 +3174,7 @@ if (elements.batchNext) {
 
 if (elements.exitBatch) {
   elements.exitBatch.addEventListener("click", () => {
-    exitBatchMode();
+    exitBatchSession();
   });
 }
 
@@ -3190,16 +3193,11 @@ if (elements.batchTaskList) {
 
 if (elements.shareScale) {
   elements.shareScale.addEventListener("change", () => {
-    batchState.shareScale = elements.shareScale.checked;
-    if (batchState.shareScale && state.scale.enabled) {
-      batchState.sharedScale = structuredClone(state.scale);
+    session.shareScale = elements.shareScale.checked;
+    if (session.shareScale && state.scale.enabled) {
+      session.sharedScale = structuredClone(state.scale);
     }
-  });
-}
-
-if (elements.applyProjectToAll) {
-  elements.applyProjectToAll.addEventListener("change", () => {
-    batchState.applyProjectToAll = elements.applyProjectToAll.checked;
+    updateBatchUI();
   });
 }
 

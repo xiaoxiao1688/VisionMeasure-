@@ -164,6 +164,18 @@ def list_sessions():
 
         file_prefix = _safe_prefix(json_path.stem)
         image_meta = content.get("imageMeta") or {}
+        
+        is_batch_session = bool(content.get("isBatchSession", False))
+        batch_info = None
+        if is_batch_session:
+            batch_info = {
+                "batchId": content.get("batchId"),
+                "batchName": content.get("batchName"),
+                "taskIndex": content.get("taskIndex"),
+                "totalTasks": content.get("totalTasks"),
+                "shareScale": content.get("shareScale", False),
+            }
+
         sessions.append(
             {
                 "filePrefix": file_prefix,
@@ -176,6 +188,8 @@ def list_sessions():
                 "exportFilename": content.get("exportFilename", ""),
                 "hasOriginalImage": _find_saved_image(file_prefix, "-original") is not None,
                 "hasAnnotatedImage": _find_saved_image(file_prefix, "-annotated") is not None,
+                "isBatchSession": is_batch_session,
+                "batchInfo": batch_info,
             }
         )
 
@@ -199,6 +213,23 @@ def get_session(file_prefix: str):
 
     content["originalImage"] = _load_base64_image(_find_saved_image(safe_prefix, "-original"))
     content["annotatedImage"] = _load_base64_image(_find_saved_image(safe_prefix, "-annotated"))
+    
+    is_batch_session = bool(content.get("isBatchSession", False))
+    if is_batch_session:
+        content["isBatchSession"] = True
+        if "batchId" not in content:
+            content["batchId"] = None
+        if "batchName" not in content:
+            content["batchName"] = None
+        if "taskIndex" not in content:
+            content["taskIndex"] = 0
+        if "totalTasks" not in content:
+            content["totalTasks"] = 1
+        if "shareScale" not in content:
+            content["shareScale"] = False
+        if "sharedScale" not in content:
+            content["sharedScale"] = None
+    
     return jsonify(content), 200
 
 
@@ -280,6 +311,19 @@ def save_annotations():
     if scale is not None:
         document["scale"] = scale
 
+    is_batch_session = bool(payload.get("isBatchSession", False))
+    if is_batch_session:
+        document["isBatchSession"] = True
+        document["batchId"] = payload.get("batchId")
+        document["batchName"] = payload.get("batchName")
+        document["taskIndex"] = payload.get("taskIndex", 0)
+        document["totalTasks"] = payload.get("totalTasks", 1)
+        document["shareScale"] = bool(payload.get("shareScale", False))
+        
+        shared_scale = _normalize_scale(payload.get("sharedScale"))
+        if shared_scale is not None:
+            document["sharedScale"] = shared_scale
+
     json_path = DATA_DIR / f"{file_prefix}.json"
     json_path.write_text(json.dumps(document, indent=2, ensure_ascii=True), encoding="utf-8")
     saved_files.append(json_path.name)
@@ -290,6 +334,7 @@ def save_annotations():
                 "message": "Annotations saved successfully.",
                 "filePrefix": file_prefix,
                 "savedFiles": saved_files,
+                "isBatchSession": is_batch_session,
             }
         ),
         201,
