@@ -99,6 +99,30 @@ const elements = {
   exitBatch: document.querySelector("#exit-batch"),
   shareScale: document.querySelector("#share-scale"),
   applyProjectToAll: document.querySelector("#apply-project-to-all"),
+  templateSelect: document.querySelector("#template-select"),
+  templatePanel: document.querySelector("#template-panel"),
+  categoryList: document.querySelector("#category-list"),
+  newTemplateButton: document.querySelector("#new-template-button"),
+  editTemplateButton: document.querySelector("#edit-template-button"),
+  deleteTemplateButton: document.querySelector("#delete-template-button"),
+  newCategoryButton: document.querySelector("#new-category-button"),
+  templateModalOverlay: document.querySelector("#template-modal-overlay"),
+  templateModalTitle: document.querySelector("#template-modal-title"),
+  templateNameInput: document.querySelector("#template-name-input"),
+  templateDefaultCheckbox: document.querySelector("#template-default-checkbox"),
+  templateModalCancel: document.querySelector("#template-modal-cancel"),
+  templateModalConfirm: document.querySelector("#template-modal-confirm"),
+  categoryModalOverlay: document.querySelector("#category-modal-overlay"),
+  categoryModalTitle: document.querySelector("#category-modal-title"),
+  categoryNameInput: document.querySelector("#category-name-input"),
+  categoryColorInput: document.querySelector("#category-color-input"),
+  categoryShapeType: document.querySelector("#category-shape-type"),
+  categoryNamingPattern: document.querySelector("#category-naming-pattern"),
+  categoryShowMeasurements: document.querySelector("#category-show-measurements"),
+  categoryExportIncluded: document.querySelector("#category-export-included"),
+  categoryModalCancel: document.querySelector("#category-modal-cancel"),
+  categoryModalConfirm: document.querySelector("#category-modal-confirm"),
+  colorPresetGrid: document.querySelector("#color-preset-grid"),
 };
 
 const state = {
@@ -131,6 +155,375 @@ const state = {
   scaleDraft: null,
   pendingScalePixels: 0,
 };
+
+const presetColors = [
+  "#ff8f62",
+  "#55d5ff",
+  "#8ae35f",
+  "#ff6b9d",
+  "#ffd18a",
+  "#9d4edd",
+  "#06b6d4",
+  "#f43f5e",
+  "#84cc16",
+  "#f97316",
+  "#8b5cf6",
+  "#0ea5e9",
+];
+
+function generateDefaultTemplates() {
+  return [
+    {
+      id: crypto.randomUUID(),
+      name: "默认模板",
+      isDefault: true,
+      createdAt: new Date().toISOString(),
+      categories: [
+        {
+          id: crypto.randomUUID(),
+          name: "缺陷",
+          color: "#ff8f62",
+          shapeType: "rectangle",
+          namingPattern: "缺陷-{n}",
+          nextNumber: 1,
+          showMeasurements: true,
+          exportIncluded: true,
+        },
+        {
+          id: crypto.randomUUID(),
+          name: "区域",
+          color: "#8ae35f",
+          shapeType: "polygon",
+          namingPattern: "区域-{n}",
+          nextNumber: 1,
+          showMeasurements: true,
+          exportIncluded: true,
+        },
+        {
+          id: crypto.randomUUID(),
+          name: "路径",
+          color: "#55d5ff",
+          shapeType: "line",
+          namingPattern: "路径-{n}",
+          nextNumber: 1,
+          showMeasurements: true,
+          exportIncluded: true,
+        },
+      ],
+    },
+  ];
+}
+
+function createEmptyTemplate() {
+  return {
+    id: crypto.randomUUID(),
+    name: "新模板",
+    isDefault: false,
+    createdAt: new Date().toISOString(),
+    categories: [],
+  };
+}
+
+function createEmptyCategory() {
+  return {
+    id: crypto.randomUUID(),
+    name: "新类别",
+    color: presetColors[0],
+    shapeType: "rectangle",
+    namingPattern: "{n}",
+    nextNumber: 1,
+    showMeasurements: true,
+    exportIncluded: true,
+  };
+}
+
+function normalizeLoadedTemplate(template) {
+  if (!template || typeof template !== "object") {
+    return null;
+  }
+
+  const normalized = {
+    id: template.id || crypto.randomUUID(),
+    name: String(template.name || "未命名模板"),
+    isDefault: Boolean(template.isDefault),
+    createdAt: String(template.createdAt || new Date().toISOString()),
+    categories: [],
+  };
+
+  if (Array.isArray(template.categories)) {
+    normalized.categories = template.categories
+      .map((cat) => {
+        if (!cat || typeof cat !== "object") {
+          return null;
+        }
+        return {
+          id: cat.id || crypto.randomUUID(),
+          name: String(cat.name || "未命名类别"),
+          color: String(cat.color || "#ff8f62"),
+          shapeType: String(cat.shapeType || "rectangle"),
+          namingPattern: String(cat.namingPattern || "{n}"),
+          nextNumber: Number(cat.nextNumber) || 1,
+          showMeasurements: Boolean(cat.showMeasurements !== false),
+          exportIncluded: Boolean(cat.exportIncluded !== false),
+        };
+      })
+      .filter(Boolean);
+  }
+
+  return normalized;
+}
+
+function normalizeLoadedTemplates(templates) {
+  if (!Array.isArray(templates)) {
+    return generateDefaultTemplates();
+  }
+  const normalized = templates.map(normalizeLoadedTemplate).filter(Boolean);
+  return normalized.length > 0 ? normalized : generateDefaultTemplates();
+}
+
+const templatesState = {
+  templates: generateDefaultTemplates(),
+  activeTemplateId: null,
+  activeCategoryId: null,
+};
+
+function getActiveTemplate() {
+  if (!templatesState.activeTemplateId) {
+    if (templatesState.templates.length > 0) {
+      templatesState.activeTemplateId = templatesState.templates[0].id;
+      return templatesState.templates[0];
+    }
+    return null;
+  }
+  return templatesState.templates.find((t) => t.id === templatesState.activeTemplateId) || null;
+}
+
+function getActiveCategory() {
+  const template = getActiveTemplate();
+  if (!template || !templatesState.activeCategoryId) {
+    return null;
+  }
+  return template.categories.find((c) => c.id === templatesState.activeCategoryId) || null;
+}
+
+function setActiveTemplate(templateId) {
+  const template = templatesState.templates.find((t) => t.id === templateId);
+  if (!template) {
+    return false;
+  }
+  templatesState.activeTemplateId = templateId;
+  templatesState.activeCategoryId = template.categories.length > 0 ? template.categories[0].id : null;
+  renderTemplateList();
+  renderCategoryList();
+  updateToolButtons();
+  return true;
+}
+
+function setActiveCategory(categoryId) {
+  const template = getActiveTemplate();
+  if (!template) {
+    return false;
+  }
+  const category = template.categories.find((c) => c.id === categoryId);
+  if (!category) {
+    return false;
+  }
+  templatesState.activeCategoryId = categoryId;
+  state.currentTool = category.shapeType;
+  renderCategoryList();
+  updateToolButtons();
+  setStatus(`已选择类别：${category.name}，工具：${category.shapeType === "rectangle" ? "矩形" : category.shapeType === "polygon" ? "多边形" : category.shapeType === "line" ? "折线" : "画笔"}`);
+  return true;
+}
+
+function addTemplate(template) {
+  templatesState.templates.push(template);
+  renderTemplateList();
+  setActiveTemplate(template.id);
+  saveTemplatesToCurrentTask();
+}
+
+function updateTemplate(templateId, updates) {
+  const index = templatesState.templates.findIndex((t) => t.id === templateId);
+  if (index === -1) {
+    return false;
+  }
+  Object.assign(templatesState.templates[index], updates);
+  renderTemplateList();
+  saveTemplatesToCurrentTask();
+  return true;
+}
+
+function deleteTemplate(templateId) {
+  const index = templatesState.templates.findIndex((t) => t.id === templateId);
+  if (index === -1) {
+    return false;
+  }
+  if (templatesState.templates.length <= 1) {
+    setStatus("至少需要保留一个模板。", "error");
+    return false;
+  }
+  templatesState.templates.splice(index, 1);
+  if (templatesState.activeTemplateId === templateId) {
+    templatesState.activeTemplateId = templatesState.templates[0].id;
+    templatesState.activeCategoryId =
+      templatesState.templates[0].categories.length > 0 ? templatesState.templates[0].categories[0].id : null;
+  }
+  renderTemplateList();
+  renderCategoryList();
+  saveTemplatesToCurrentTask();
+  setStatus("已删除模板。");
+  return true;
+}
+
+function addCategory(templateId, category) {
+  const template = templatesState.templates.find((t) => t.id === templateId);
+  if (!template) {
+    return false;
+  }
+  template.categories.push(category);
+  renderCategoryList();
+  saveTemplatesToCurrentTask();
+  return true;
+}
+
+function updateCategory(templateId, categoryId, updates) {
+  const template = templatesState.templates.find((t) => t.id === templateId);
+  if (!template) {
+    return false;
+  }
+  const category = template.categories.find((c) => c.id === categoryId);
+  if (!category) {
+    return false;
+  }
+  Object.assign(category, updates);
+  renderCategoryList();
+  saveTemplatesToCurrentTask();
+  return true;
+}
+
+function deleteCategory(templateId, categoryId) {
+  const template = templatesState.templates.find((t) => t.id === templateId);
+  if (!template) {
+    return false;
+  }
+  const index = template.categories.findIndex((c) => c.id === categoryId);
+  if (index === -1) {
+    return false;
+  }
+  template.categories.splice(index, 1);
+  if (templatesState.activeCategoryId === categoryId) {
+    templatesState.activeCategoryId =
+      template.categories.length > 0 ? template.categories[0].id : null;
+  }
+  renderCategoryList();
+  saveTemplatesToCurrentTask();
+  setStatus("已删除类别。");
+  return true;
+}
+
+function generateNextCategoryName(category) {
+  if (!category) {
+    return "";
+  }
+  const name = category.namingPattern.replace("{n}", String(category.nextNumber));
+  category.nextNumber += 1;
+  return name;
+}
+
+function getAnnotationCategoryColor(annotation) {
+  const defaultColors = {
+    rectangle: "#ff8f62",
+    line: "#55d5ff",
+    polygon: "#8ae35f",
+    brush: "#ff6b9d",
+  };
+  if (annotation.categoryId) {
+    const template = getActiveTemplate();
+    if (template) {
+      const category = template.categories.find((c) => c.id === annotation.categoryId);
+      if (category) {
+        return category.color;
+      }
+    }
+  }
+  return annotation.color || defaultColors[annotation.type] || "#ff8f62";
+}
+
+function getCategoryColorForShape(shapeType) {
+  const defaultColors = {
+    rectangle: "#ff8f62",
+    line: "#55d5ff",
+    polygon: "#8ae35f",
+    brush: "#ff6b9d",
+  };
+  const category = getActiveCategory();
+  if (category && category.shapeType === shapeType) {
+    return category.color;
+  }
+  return defaultColors[shapeType] || "#ff8f62";
+}
+
+function saveTemplatesToCurrentTask() {
+  const currentTask = getCurrentTask();
+  if (currentTask) {
+    currentTask.templates = structuredClone(templatesState.templates);
+    currentTask.activeTemplateId = templatesState.activeTemplateId;
+    currentTask.activeCategoryId = templatesState.activeCategoryId;
+  }
+}
+
+function loadTemplatesFromTask(task) {
+  if (!task) {
+    return;
+  }
+  if (task.templates && task.templates.length > 0) {
+    templatesState.templates = normalizeLoadedTemplates(task.templates);
+  } else {
+    templatesState.templates = generateDefaultTemplates();
+  }
+  if (task.activeTemplateId) {
+    const template = templatesState.templates.find((t) => t.id === task.activeTemplateId);
+    if (template) {
+      templatesState.activeTemplateId = task.activeTemplateId;
+      if (task.activeCategoryId) {
+        const category = template.categories.find((c) => c.id === task.activeCategoryId);
+        templatesState.activeCategoryId = category ? task.activeCategoryId : null;
+      } else {
+        templatesState.activeCategoryId = template.categories.length > 0 ? template.categories[0].id : null;
+      }
+    }
+  } else {
+    templatesState.activeTemplateId = templatesState.templates.length > 0 ? templatesState.templates[0].id : null;
+    templatesState.activeCategoryId =
+      templatesState.templates.length > 0 && templatesState.templates[0].categories.length > 0
+        ? templatesState.templates[0].categories[0].id
+        : null;
+  }
+}
+
+function serializeTemplates() {
+  return {
+    templates: templatesState.templates.map((template) => ({
+      id: template.id,
+      name: template.name,
+      isDefault: template.isDefault,
+      createdAt: template.createdAt,
+      categories: template.categories.map((cat) => ({
+        id: cat.id,
+        name: cat.name,
+        color: cat.color,
+        shapeType: cat.shapeType,
+        namingPattern: cat.namingPattern,
+        nextNumber: cat.nextNumber,
+        showMeasurements: cat.showMeasurements,
+        exportIncluded: cat.exportIncluded,
+      })),
+    })),
+    activeTemplateId: templatesState.activeTemplateId,
+    activeCategoryId: templatesState.activeCategoryId,
+  };
+}
 
 const session = {
   isBatchSession: false,
@@ -241,6 +634,9 @@ function createTaskFromFile(file) {
     imageOffset: { x: 0, y: 0 },
     displayMode: "fit",
     scale: createDefaultScaleState(),
+    templates: structuredClone(templatesState.templates),
+    activeTemplateId: templatesState.activeTemplateId,
+    activeCategoryId: templatesState.activeCategoryId,
     ...createTaskProjectSettings(readProjectSettingsFromForm()),
     saved: false,
     savedPrefix: null,
@@ -269,6 +665,16 @@ function createTaskFromHistory(historyTaskData, fullSessionData = null) {
     ? normalizeLoadedAnnotations(fullSessionData.annotations)
     : [];
 
+  let taskTemplates = null;
+  let taskActiveTemplateId = null;
+  let taskActiveCategoryId = null;
+
+  if (fullSessionData && fullSessionData.templates && fullSessionData.templates.length > 0) {
+    taskTemplates = normalizeLoadedTemplates(fullSessionData.templates);
+    taskActiveTemplateId = fullSessionData.activeTemplateId || null;
+    taskActiveCategoryId = fullSessionData.activeCategoryId || null;
+  }
+
   return {
     taskId: crypto.randomUUID(),
     fileName: imageMeta.name || historyTaskData.imageName || "历史图片",
@@ -283,6 +689,9 @@ function createTaskFromHistory(historyTaskData, fullSessionData = null) {
     imageOffset: { x: 0, y: 0 },
     displayMode: "fit",
     scale: taskScale,
+    templates: taskTemplates,
+    activeTemplateId: taskActiveTemplateId,
+    activeCategoryId: taskActiveCategoryId,
     ...createTaskProjectSettings({
       projectName: fullSessionData?.projectName || historyTaskData.projectName,
       projectNotes: fullSessionData?.projectNotes || historyTaskData.notes,
@@ -313,6 +722,12 @@ function syncStateFromTask(task) {
     : structuredClone(task.scale);
   state.originalImageDataUrl = task.originalImageDataUrl || null;
   state.currentSessionPrefix = task.savedPrefix;
+  
+  loadTemplatesFromTask(task);
+  
+  renderTemplateList();
+  renderCategoryList();
+  
   syncProjectSettingsFromTask(task);
 }
 
@@ -329,6 +744,9 @@ function syncTaskFromState(task) {
   task.scale = structuredClone(state.scale);
   task.originalImageDataUrl = state.originalImageDataUrl;
   task.savedPrefix = state.currentSessionPrefix;
+  
+  saveTemplatesToCurrentTask();
+  
   syncTaskProjectSettingsFromForm(task);
 }
 
@@ -933,8 +1351,11 @@ function drawAnnotation(annotation, isDraft = false) {
     return;
   }
 
+  const categoryColor = getAnnotationCategoryColor(annotation);
+
   if (annotation.type === "line") {
-    drawPolylineAnnotation(annotation, "#55d5ff", "#8ae6ff", isDraft);
+    const selectedColor = lightenColor(categoryColor, 20);
+    drawPolylineAnnotation(annotation, categoryColor, selectedColor, isDraft);
     return;
   }
 
@@ -944,11 +1365,33 @@ function drawAnnotation(annotation, isDraft = false) {
   }
 
   if (annotation.type === "brush") {
-    drawPolylineAnnotation(annotation, "#ff6b9d", "#ffd18a", isDraft);
+    const selectedColor = lightenColor(categoryColor, 20);
+    drawPolylineAnnotation(annotation, categoryColor, selectedColor, isDraft);
     return;
   }
 
   drawRectangleAnnotation(annotation, isDraft);
+}
+
+function lightenColor(hex, percent) {
+  const num = parseInt(hex.replace("#", ""), 16);
+  const amt = Math.round(2.55 * percent);
+  const R = (num >> 16) + amt;
+  const G = (num >> 8 & 0x00FF) + amt;
+  const B = (num & 0x0000FF) + amt;
+  return "#" + (
+    0x1000000 +
+    (R < 255 ? (R < 1 ? 0 : R) : 255) * 0x10000 +
+    (G < 255 ? (G < 1 ? 0 : G) : 255) * 0x100 +
+    (B < 255 ? (B < 1 ? 0 : B) : 255)
+  ).toString(16).slice(1);
+}
+
+function rgbaFromHex(hex, alpha) {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
 function drawRectangleAnnotation(annotation, isDraft) {
@@ -959,10 +1402,14 @@ function drawRectangleAnnotation(annotation, isDraft) {
   const width = annotation.width * placement.scale;
   const height = annotation.height * placement.scale;
 
+  const categoryColor = getAnnotationCategoryColor(annotation);
+  const selectedColor = lightenColor(categoryColor, 20);
+  const fillAlpha = isDraft ? 0.12 : 0.18;
+
   ctx.save();
   ctx.lineWidth = selected ? 3 : 2;
-  ctx.strokeStyle = selected ? "#ffd18a" : "#ff8f62";
-  ctx.fillStyle = isDraft ? "rgba(255, 143, 98, 0.12)" : "rgba(255, 143, 98, 0.18)";
+  ctx.strokeStyle = selected ? selectedColor : categoryColor;
+  ctx.fillStyle = rgbaFromHex(categoryColor, fillAlpha);
   ctx.strokeRect(x, y, width, height);
   ctx.fillRect(x, y, width, height);
   
@@ -1022,10 +1469,14 @@ function drawPolygonAnnotation(annotation, isDraft) {
     return;
   }
 
+  const categoryColor = getAnnotationCategoryColor(annotation);
+  const selectedColor = lightenColor(categoryColor, 20);
+  const fillAlpha = isDraft ? 0.12 : 0.22;
+
   ctx.save();
   ctx.lineWidth = selected ? 3 : 2;
-  ctx.strokeStyle = selected ? "#b8ff8a" : "#8ae35f";
-  ctx.fillStyle = isDraft ? "rgba(138, 227, 95, 0.12)" : "rgba(138, 227, 95, 0.22)";
+  ctx.strokeStyle = selected ? selectedColor : categoryColor;
+  ctx.fillStyle = rgbaFromHex(categoryColor, fillAlpha);
   ctx.beginPath();
   ctx.moveTo(points[0].x, points[0].y);
   for (let index = 1; index < points.length; index += 1) {
@@ -1226,47 +1677,87 @@ function normalizeRectangle(start, end) {
   const width = Math.abs(end.x - start.x);
   const height = Math.abs(end.y - start.y);
 
-  return {
+  const activeCategory = getActiveCategory();
+  const annotation = {
     id: crypto.randomUUID(),
     type: "rectangle",
     name: "",
+    categoryId: activeCategory && activeCategory.shapeType === "rectangle" ? activeCategory.id : null,
+    color: activeCategory && activeCategory.shapeType === "rectangle" ? activeCategory.color : "#ff8f62",
     x,
     y,
     width,
     height,
     area: width * height,
   };
+  
+  if (activeCategory && activeCategory.shapeType === "rectangle") {
+    annotation.name = generateNextCategoryName(activeCategory);
+    saveTemplatesToCurrentTask();
+  }
+  
+  return annotation;
 }
 
 function createLineAnnotation(points) {
-  return {
+  const activeCategory = getActiveCategory();
+  const annotation = {
     id: crypto.randomUUID(),
     type: "line",
     name: "",
+    categoryId: activeCategory && activeCategory.shapeType === "line" ? activeCategory.id : null,
+    color: activeCategory && activeCategory.shapeType === "line" ? activeCategory.color : "#55d5ff",
     points,
     length: getPolylineLength(points),
   };
+  
+  if (activeCategory && activeCategory.shapeType === "line") {
+    annotation.name = generateNextCategoryName(activeCategory);
+    saveTemplatesToCurrentTask();
+  }
+  
+  return annotation;
 }
 
 function createPolygonAnnotation(points) {
-  return {
+  const activeCategory = getActiveCategory();
+  const annotation = {
     id: crypto.randomUUID(),
     type: "polygon",
     name: "",
+    categoryId: activeCategory && activeCategory.shapeType === "polygon" ? activeCategory.id : null,
+    color: activeCategory && activeCategory.shapeType === "polygon" ? activeCategory.color : "#8ae35f",
     points,
     area: getPolygonArea(points),
     perimeter: getPolygonPerimeter(points),
   };
+  
+  if (activeCategory && activeCategory.shapeType === "polygon") {
+    annotation.name = generateNextCategoryName(activeCategory);
+    saveTemplatesToCurrentTask();
+  }
+  
+  return annotation;
 }
 
 function createBrushAnnotation(points) {
-  return {
+  const activeCategory = getActiveCategory();
+  const annotation = {
     id: crypto.randomUUID(),
     type: "brush",
     name: "",
+    categoryId: activeCategory && activeCategory.shapeType === "brush" ? activeCategory.id : null,
+    color: activeCategory && activeCategory.shapeType === "brush" ? activeCategory.color : "#ff6b9d",
     points,
     length: getPolylineLength(points),
   };
+  
+  if (activeCategory && activeCategory.shapeType === "brush") {
+    annotation.name = generateNextCategoryName(activeCategory);
+    saveTemplatesToCurrentTask();
+  }
+  
+  return annotation;
 }
 
 function getPolylineLength(points) {
@@ -1874,6 +2365,8 @@ function normalizeLoadedAnnotation(annotation) {
     id: annotation.id || crypto.randomUUID(),
     type: String(annotation.type || "rectangle"),
     name: typeof annotation.name === "string" ? annotation.name : "",
+    categoryId: annotation.categoryId || null,
+    color: annotation.color || null,
   };
 
   if (normalized.type === "rectangle") {
@@ -1983,6 +2476,73 @@ function setCurrentTool(tool) {
   refreshOverlay();
   setStatus(getToolInstructions(tool));
   drawScene();
+}
+
+function renderTemplateList() {
+  const templates = getActiveTemplates();
+  const activeId = getActiveTemplateId();
+
+  if (!templates.length) {
+    elements.templateSelect.innerHTML = '<option value="">暂无模板</option>';
+    return;
+  }
+
+  elements.templateSelect.innerHTML = templates
+    .map((template) => {
+      const selected = template.id === activeId ? "selected" : "";
+      const defaultLabel = template.isDefault ? " (默认)" : "";
+      return `<option value="${template.id}" ${selected}>${escapeHtml(template.name)}${defaultLabel}</option>`;
+    })
+    .join("");
+}
+
+function renderCategoryList() {
+  const categories = getActiveCategories();
+  const activeCategoryId = getActiveCategoryId();
+
+  if (!categories.length) {
+    elements.categoryList.innerHTML = '<li class="empty-state">暂无类别</li>';
+    return;
+  }
+
+  elements.categoryList.innerHTML = categories
+    .map((category) => {
+      const activeClass = category.id === activeCategoryId ? "category-item active" : "category-item";
+      const shapeLabel = getShapeTypeLabel(category.shapeType);
+      return `
+        <li class="${activeClass}" data-id="${category.id}">
+          <div class="category-color" style="background-color: ${category.color};"></div>
+          <div class="category-info">
+            <p class="category-name">${escapeHtml(category.name)}</p>
+            <p class="category-meta">${shapeLabel} ${category.namingPattern ? "• " + category.namingPattern : ""}</p>
+          </div>
+          <div class="category-actions">
+            <button class="category-action-btn" type="button" data-category-action="edit" title="编辑">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+              </svg>
+            </button>
+            <button class="category-action-btn" type="button" data-category-action="delete" title="删除">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+              </svg>
+            </button>
+          </div>
+        </li>
+      `;
+    })
+    .join("");
+}
+
+function getShapeTypeLabel(shapeType) {
+  const labels = {
+    rectangle: "矩形",
+    polygon: "多边形",
+    line: "折线",
+    brush: "画笔",
+  };
+  return labels[shapeType] || "未知";
 }
 
 function renderAnnotationList() {
@@ -2304,6 +2864,8 @@ function serializeAnnotations() {
     id: annotation.id,
     type: annotation.type,
     name: annotation.name || "",
+    categoryId: annotation.categoryId || null,
+    color: annotation.color || null,
     x: annotation.x !== undefined ? Number(annotation.x.toFixed(2)) : undefined,
     y: annotation.y !== undefined ? Number(annotation.y.toFixed(2)) : undefined,
     width: annotation.width !== undefined ? Number(annotation.width.toFixed(2)) : undefined,
@@ -2391,6 +2953,7 @@ async function saveAnnotations() {
         }
       : undefined,
     annotations: serializeAnnotations(),
+    ...serializeTemplates(),
     originalImage,
     annotatedImage,
   };
@@ -3605,6 +4168,286 @@ elements.projectNotes.addEventListener("input", handleBatchProjectSettingsChange
 elements.exportFilename.addEventListener("input", handleBatchProjectSettingsChanged);
 elements.imageTags.addEventListener("input", handleBatchProjectSettingsChanged);
 
+let editingTemplateId = null;
+let editingCategoryId = null;
+
+function showTemplateModal(templateId = null) {
+  editingTemplateId = templateId;
+  const template = templateId ? getTemplateById(templateId) : null;
+
+  if (template) {
+    elements.templateModalTitle.textContent = "编辑模板";
+    elements.templateNameInput.value = template.name;
+    elements.templateDefaultCheckbox.checked = template.isDefault;
+  } else {
+    elements.templateModalTitle.textContent = "新建模板";
+    elements.templateNameInput.value = "";
+    elements.templateDefaultCheckbox.checked = false;
+  }
+
+  elements.templateModalOverlay.classList.remove("hidden");
+  elements.templateNameInput.focus();
+}
+
+function hideTemplateModal() {
+  elements.templateModalOverlay.classList.add("hidden");
+  editingTemplateId = null;
+}
+
+function saveTemplate() {
+  const name = elements.templateNameInput.value.trim();
+  if (!name) {
+    setStatus("请输入模板名称。", "error");
+    return;
+  }
+
+  const isDefault = elements.templateDefaultCheckbox.checked;
+
+  if (editingTemplateId) {
+    updateTemplate(editingTemplateId, { name, isDefault });
+    setStatus(`已更新模板：${name}`);
+  } else {
+    const template = createTemplate(name, isDefault);
+    addTemplate(template);
+    setStatus(`已创建模板：${name}`);
+  }
+
+  hideTemplateModal();
+  renderTemplateList();
+  renderCategoryList();
+  saveTemplatesToStorage();
+}
+
+function showCategoryModal(categoryId = null) {
+  editingCategoryId = categoryId;
+  const category = categoryId ? getCategoryById(categoryId) : null;
+
+  if (category) {
+    elements.categoryModalTitle.textContent = "编辑类别";
+    elements.categoryNameInput.value = category.name;
+    elements.categoryColorInput.value = category.color;
+    elements.categoryShapeType.value = category.shapeType;
+    elements.categoryNamingPattern.value = category.namingPattern || "";
+    elements.categoryShowMeasurements.checked = category.showMeasurements;
+    elements.categoryExportIncluded.checked = category.exportIncluded;
+  } else {
+    elements.categoryModalTitle.textContent = "新建类别";
+    elements.categoryNameInput.value = "";
+    elements.categoryColorInput.value = presetColors[0];
+    elements.categoryShapeType.value = "rectangle";
+    elements.categoryNamingPattern.value = "";
+    elements.categoryShowMeasurements.checked = true;
+    elements.categoryExportIncluded.checked = true;
+  }
+
+  initColorPresetGrid();
+  elements.categoryModalOverlay.classList.remove("hidden");
+  elements.categoryNameInput.focus();
+}
+
+function hideCategoryModal() {
+  elements.categoryModalOverlay.classList.add("hidden");
+  editingCategoryId = null;
+}
+
+function initColorPresetGrid() {
+  elements.colorPresetGrid.innerHTML = presetColors
+    .map((color) => {
+      const activeClass = color === elements.categoryColorInput.value ? "color-preset active" : "color-preset";
+      return `<div class="${activeClass}" style="background-color: ${color};" data-color="${color}"></div>`;
+    })
+    .join("");
+}
+
+function saveCategory() {
+  const name = elements.categoryNameInput.value.trim();
+  if (!name) {
+    setStatus("请输入类别名称。", "error");
+    return;
+  }
+
+  const categoryData = {
+    name,
+    color: elements.categoryColorInput.value,
+    shapeType: elements.categoryShapeType.value,
+    namingPattern: elements.categoryNamingPattern.value.trim() || null,
+    showMeasurements: elements.categoryShowMeasurements.checked,
+    exportIncluded: elements.categoryExportIncluded.checked,
+  };
+
+  const activeTemplateId = getActiveTemplateId();
+  if (!activeTemplateId) {
+    setStatus("请先选择一个模板。", "error");
+    return;
+  }
+
+  if (editingCategoryId) {
+    updateCategory(activeTemplateId, editingCategoryId, categoryData);
+    setStatus(`已更新类别：${name}`);
+  } else {
+    const category = createCategory(categoryData.name, categoryData.color, categoryData.shapeType);
+    Object.assign(category, categoryData);
+    addCategory(activeTemplateId, category);
+    setStatus(`已创建类别：${name}`);
+  }
+
+  hideCategoryModal();
+  renderCategoryList();
+  saveTemplatesToStorage();
+}
+
+function deleteCurrentTemplate() {
+  const activeTemplateId = getActiveTemplateId();
+  if (!activeTemplateId) {
+    setStatus("没有可删除的模板。", "error");
+    return;
+  }
+
+  const templates = getActiveTemplates();
+  if (templates.length <= 1) {
+    setStatus("至少需要保留一个模板。", "error");
+    return;
+  }
+
+  const template = getTemplateById(activeTemplateId);
+  if (template && confirm(`确定要删除模板"${template.name}"及其所有类别吗？`)) {
+    removeTemplate(activeTemplateId);
+    renderTemplateList();
+    renderCategoryList();
+    saveTemplatesToStorage();
+    setStatus(`已删除模板：${template.name}`);
+  }
+}
+
+function selectTemplate(templateId) {
+  if (getCurrentTask()) {
+    const task = getCurrentTask();
+    task.activeTemplateId = templateId;
+    task.activeCategoryId = null;
+  } else {
+    templatesState.activeTemplateId = templateId;
+    templatesState.activeCategoryId = null;
+  }
+  renderTemplateList();
+  renderCategoryList();
+  saveTemplatesToStorage();
+}
+
+function selectCategory(categoryId) {
+  if (getCurrentTask()) {
+    const task = getCurrentTask();
+    task.activeCategoryId = categoryId;
+  } else {
+    templatesState.activeCategoryId = categoryId;
+  }
+  renderCategoryList();
+  saveTemplatesToStorage();
+}
+
+function deleteCategoryFromUI(categoryId) {
+  const category = getCategoryById(categoryId);
+  if (category && confirm(`确定要删除类别"${category.name}"吗？`)) {
+    const activeTemplateId = getActiveTemplateId();
+    if (activeTemplateId) {
+      removeCategory(activeTemplateId, categoryId);
+      renderCategoryList();
+      saveTemplatesToStorage();
+      setStatus(`已删除类别：${category.name}`);
+    }
+  }
+}
+
+elements.templateSelect.addEventListener("change", (event) => {
+  const templateId = event.target.value;
+  if (templateId) {
+    selectTemplate(templateId);
+  }
+});
+
+elements.newTemplateButton.addEventListener("click", () => {
+  showTemplateModal();
+});
+
+elements.editTemplateButton.addEventListener("click", () => {
+  const activeTemplateId = getActiveTemplateId();
+  if (activeTemplateId) {
+    showTemplateModal(activeTemplateId);
+  } else {
+    setStatus("请先选择一个模板。", "error");
+  }
+});
+
+elements.deleteTemplateButton.addEventListener("click", () => {
+  deleteCurrentTemplate();
+});
+
+elements.newCategoryButton.addEventListener("click", () => {
+  const activeTemplateId = getActiveTemplateId();
+  if (activeTemplateId) {
+    showCategoryModal();
+  } else {
+    setStatus("请先选择一个模板。", "error");
+  }
+});
+
+elements.templateModalCancel.addEventListener("click", hideTemplateModal);
+elements.templateModalConfirm.addEventListener("click", saveTemplate);
+
+elements.categoryModalCancel.addEventListener("click", hideCategoryModal);
+elements.categoryModalConfirm.addEventListener("click", saveCategory);
+
+elements.colorPresetGrid.addEventListener("click", (event) => {
+  const preset = event.target.closest(".color-preset");
+  if (preset) {
+    const color = preset.dataset.color;
+    elements.categoryColorInput.value = color;
+    initColorPresetGrid();
+  }
+});
+
+elements.categoryList.addEventListener("click", (event) => {
+  const categoryItem = event.target.closest(".category-item");
+  if (!categoryItem) return;
+
+  const categoryId = categoryItem.dataset.id;
+  const actionBtn = event.target.closest(".category-action-btn");
+
+  if (actionBtn) {
+    const action = actionBtn.dataset.categoryAction;
+    if (action === "edit") {
+      showCategoryModal(categoryId);
+    } else if (action === "delete") {
+      deleteCategoryFromUI(categoryId);
+    }
+  } else {
+    selectCategory(categoryId);
+  }
+});
+
+elements.templateModalOverlay.addEventListener("click", (event) => {
+  if (event.target === elements.templateModalOverlay) {
+    hideTemplateModal();
+  }
+});
+
+elements.categoryModalOverlay.addEventListener("click", (event) => {
+  if (event.target === elements.categoryModalOverlay) {
+    hideCategoryModal();
+  }
+});
+
+elements.templateNameInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    saveTemplate();
+  }
+});
+
+elements.categoryNameInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    saveCategory();
+  }
+});
+
 renderAnnotationList();
 updateToolButtons();
 updateDisplayModeButtons();
@@ -3614,3 +4457,7 @@ updateScalePanel();
 refreshOverlay();
 syncCanvasSize();
 loadHistoryList();
+
+loadTemplatesFromStorage();
+renderTemplateList();
+renderCategoryList();

@@ -741,6 +741,240 @@ textarea {
   color: var(--accent-strong);
 }
 
+.template-panel {
+  margin-top: 14px;
+  padding: 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(25, 50, 60, 0.12);
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.template-panel .panel-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.template-panel .panel-heading h3,
+.template-panel .panel-heading h4 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.template-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.template-action-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.template-action-button:hover {
+  background: rgba(25, 50, 60, 0.08);
+  color: var(--text);
+}
+
+.template-select-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.template-select-row .field-label {
+  margin-bottom: 0;
+}
+
+.template-select {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--surface-strong);
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.template-select:focus {
+  outline: none;
+  border-color: var(--accent-strong);
+  box-shadow: 0 0 0 2px rgba(255, 143, 98, 0.2);
+}
+
+.category-section {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(25, 50, 60, 0.1);
+}
+
+.category-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.category-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  border: 1px solid transparent;
+}
+
+.category-item:hover {
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.category-item.active {
+  border-color: var(--accent-strong);
+  background: rgba(255, 143, 98, 0.1);
+}
+
+.category-color {
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+  border: 1px solid rgba(25, 50, 60, 0.2);
+}
+
+.category-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.category-name {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.category-meta {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.category-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.category-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: all 0.15s ease;
+}
+
+.category-item:hover .category-action-btn {
+  opacity: 1;
+}
+
+.category-action-btn:hover {
+  background: rgba(25, 50, 60, 0.1);
+  color: var(--text);
+}
+
+.color-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.color-picker-row input[type="color"] {
+  width: 40px;
+  height: 36px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  background: none;
+}
+
+.color-preset-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 4px;
+  flex: 1;
+}
+
+.color-preset {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: all 0.15s ease;
+}
+
+.color-preset:hover {
+  transform: scale(1.1);
+}
+
+.color-preset.active {
+  border-color: var(--text);
+  box-shadow: 0 0 0 1px var(--surface-strong);
+}
+
+.setting-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.setting-row input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.setting-row label {
+  margin: 0;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
 .modal-overlay {
   position: fixed;
   top: 0;
