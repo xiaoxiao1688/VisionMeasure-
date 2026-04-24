@@ -25,11 +25,61 @@
           <label class="field-label" for="image-loader">加载图片</label>
           <div class="file-picker">
             <input id="image-loader" class="file-input" type="file" accept="image/*" />
-            <label for="image-loader" class="file-trigger">选择图片</label>
+            <input id="batch-image-loader" class="file-input" type="file" accept="image/*" multiple />
+            <div class="file-trigger-group">
+              <label for="image-loader" class="file-trigger">单图模式</label>
+              <label for="batch-image-loader" class="file-trigger secondary">批量模式</label>
+            </div>
             <div class="file-meta">
               <strong id="file-name">未选择图片</strong>
-              <span>支持 PNG、JPG、JPEG、WebP、BMP</span>
+              <span id="batch-progress">支持 PNG、JPG、JPEG、WebP、BMP</span>
             </div>
+          </div>
+
+          <div id="batch-panel" class="batch-panel hidden">
+            <div class="panel-heading">
+              <h3>批量任务</h3>
+              <div class="batch-status">
+                <span id="batch-current-index">0</span>/<span id="batch-total">0</span>
+                <button id="exit-batch" class="refresh-button" type="button" title="退出批量模式">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M18 6 6 18M6 6l12 12"></path>
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <div class="batch-nav">
+              <button id="batch-prev" class="batch-nav-button" type="button" disabled>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M15 18l-6-6 6-6"></path>
+                </svg>
+                上一张
+              </button>
+              <button id="batch-next" class="batch-nav-button" type="button" disabled>
+                下一张
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M9 18l6-6-6-6"></path>
+                </svg>
+              </button>
+            </div>
+            <div class="batch-settings">
+              <label class="field-label">项目级设置</label>
+              <div class="setting-row">
+                <input type="checkbox" id="share-scale" />
+                <label for="share-scale">复用比例标定</label>
+              </div>
+              <div class="setting-row">
+                <input type="checkbox" id="apply-project-to-all" />
+                <label for="apply-project-to-all">应用项目名称和备注到所有图片</label>
+              </div>
+            </div>
+            <div class="panel-heading">
+              <h4>任务列表</h4>
+              <span id="batch-completed">已完成 0 张</span>
+            </div>
+            <ul id="batch-task-list" class="batch-task-list">
+              <li class="empty-state">暂无批量任务</li>
+            </ul>
           </div>
 
           <div class="tool-row">

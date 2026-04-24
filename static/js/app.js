@@ -87,6 +87,18 @@ const elements = {
   scalePreviewLength: document.querySelector("#scale-preview-length"),
   scaleCancel: document.querySelector("#scale-cancel"),
   scaleConfirm: document.querySelector("#scale-confirm"),
+  batchImageLoader: document.querySelector("#batch-image-loader"),
+  batchPanel: document.querySelector("#batch-panel"),
+  batchCurrentIndex: document.querySelector("#batch-current-index"),
+  batchTotal: document.querySelector("#batch-total"),
+  batchPrev: document.querySelector("#batch-prev"),
+  batchNext: document.querySelector("#batch-next"),
+  batchTaskList: document.querySelector("#batch-task-list"),
+  batchCompleted: document.querySelector("#batch-completed"),
+  batchProgress: document.querySelector("#batch-progress"),
+  exitBatch: document.querySelector("#exit-batch"),
+  shareScale: document.querySelector("#share-scale"),
+  applyProjectToAll: document.querySelector("#apply-project-to-all"),
 };
 
 const state = {
@@ -119,6 +131,415 @@ const state = {
   scaleDraft: null,
   pendingScalePixels: 0,
 };
+
+const batchState = {
+  enabled: false,
+  tasks: [],
+  currentIndex: -1,
+  taskStates: {},
+  shareScale: false,
+  sharedScale: null,
+  applyProjectToAll: false,
+};
+
+function createTaskSnapshot() {
+  return {
+    annotations: structuredClone(state.annotations),
+    selectedId: state.selectedId,
+    undoStack: structuredClone(state.undoStack),
+    scale: structuredClone(state.scale),
+    imageOffset: { ...state.imageOffset },
+    displayMode: state.displayMode,
+    originalImageDataUrl: state.originalImageDataUrl,
+    currentTool: state.currentTool,
+    saved: false,
+    savedPrefix: null,
+    annotationCount: state.annotations.length,
+  };
+}
+
+function restoreTaskFromSnapshot(snapshot) {
+  if (!snapshot) {
+    return;
+  }
+
+  state.annotations = structuredClone(snapshot.annotations);
+  state.selectedId = snapshot.selectedId;
+  state.undoStack = structuredClone(snapshot.undoStack);
+  state.imageOffset = { ...snapshot.imageOffset };
+  state.displayMode = snapshot.displayMode;
+  state.originalImageDataUrl = snapshot.originalImageDataUrl;
+  state.currentTool = snapshot.currentTool;
+
+  if (batchState.shareScale && batchState.sharedScale) {
+    state.scale = structuredClone(batchState.sharedScale);
+  } else {
+    state.scale = structuredClone(snapshot.scale);
+  }
+
+  resetDraftState();
+  resetScaleState();
+  resetEditState();
+}
+
+function startBatchMode(files) {
+  if (!files || files.length === 0) {
+    return;
+  }
+
+  const imageFiles = Array.from(files).filter((file) => file.type.startsWith("image/"));
+
+  if (imageFiles.length === 0) {
+    setStatus("没有选择有效的图片文件。", "error");
+    return;
+  }
+
+  batchState.tasks = imageFiles.map((file, index) => ({
+    id: crypto.randomUUID(),
+    file: file,
+    fileName: file.name,
+    imageDataUrl: null,
+    imageMeta: null,
+    loaded: false,
+  }));
+
+  batchState.currentIndex = 0;
+  batchState.taskStates = {};
+  batchState.enabled = true;
+  batchState.shareScale = elements.shareScale ? elements.shareScale.checked : false;
+  batchState.applyProjectToAll = elements.applyProjectToAll ? elements.applyProjectToAll.checked : false;
+  batchState.sharedScale = null;
+
+  if (elements.batchPanel) {
+    elements.batchPanel.classList.remove("hidden");
+  }
+
+  loadBatchTask(0);
+  setStatus(`已进入批量模式，共 ${batchState.tasks.length} 张图片。`);
+}
+
+function saveCurrentTaskState() {
+  if (!batchState.enabled || batchState.currentIndex < 0) {
+    return;
+  }
+
+  const currentTask = batchState.tasks[batchState.currentIndex];
+  if (!currentTask) {
+    return;
+  }
+
+  const snapshot = createTaskSnapshot();
+  const existingState = batchState.taskStates[currentTask.id];
+  if (existingState) {
+    snapshot.saved = existingState.saved;
+    snapshot.savedPrefix = existingState.savedPrefix;
+    snapshot.annotationCount = existingState.annotationCount;
+  }
+
+  batchState.taskStates[currentTask.id] = snapshot;
+}
+
+function loadBatchTask(index) {
+  if (!batchState.enabled || index < 0 || index >= batchState.tasks.length) {
+    return;
+  }
+
+  if (batchState.currentIndex >= 0) {
+    saveCurrentTaskState();
+  }
+
+  const targetTask = batchState.tasks[index];
+  batchState.currentIndex = index;
+
+  const taskState = batchState.taskStates[targetTask.id];
+
+  if (targetTask.loaded && taskState) {
+    restoreTaskFromSnapshot(taskState);
+    loadImageFromSource(targetTask.imageDataUrl, targetTask.fileName, {
+      imageFile: targetTask.file,
+      preserveAnnotations: true,
+      afterLoad: () => {
+        renderAnnotationList();
+        updateAnnotationNameEditor();
+        updateDisplayModeButtons();
+        updateImagePositionDisplay();
+        updateToolButtons();
+        updateScalePanel();
+        refreshOverlay();
+        computeImagePlacement();
+        drawScene();
+        updateBatchNavigation();
+        renderBatchTaskList();
+        setStatus(`当前图片：${targetTask.fileName} (${index + 1}/${batchState.tasks.length})`);
+      },
+    });
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = () => {
+    targetTask.imageDataUrl = reader.result;
+    targetTask.loaded = true;
+
+    const image = new Image();
+    image.onload = () => {
+      targetTask.imageMeta = {
+        name: targetTask.fileName,
+        width: image.width,
+        height: image.height,
+      };
+
+      if (taskState) {
+        restoreTaskFromSnapshot(taskState);
+      } else {
+        state.annotations = [];
+        state.selectedId = null;
+        state.undoStack = [];
+        state.imageOffset = { x: 0, y: 0 };
+        state.displayMode = "fit";
+        state.originalImageDataUrl = null;
+
+        if (batchState.shareScale && batchState.sharedScale) {
+          state.scale = structuredClone(batchState.sharedScale);
+        } else {
+          state.scale = createDefaultScaleState();
+        }
+
+        if (batchState.applyProjectToAll) {
+          const firstState = Object.values(batchState.taskStates)[0];
+          if (firstState && firstState.scale && firstState.scale.enabled) {
+          }
+        }
+
+        resetDraftState();
+        resetScaleState();
+        resetEditState();
+      }
+
+      loadImageFromSource(targetTask.imageDataUrl, targetTask.fileName, {
+        imageFile: targetTask.file,
+        preserveAnnotations: true,
+        afterLoad: () => {
+          const newSnapshot = createTaskSnapshot();
+          if (!batchState.taskStates[targetTask.id]) {
+            batchState.taskStates[targetTask.id] = newSnapshot;
+          }
+
+          renderAnnotationList();
+          updateAnnotationNameEditor();
+          updateDisplayModeButtons();
+          updateImagePositionDisplay();
+          updateToolButtons();
+          updateScalePanel();
+          refreshOverlay();
+          computeImagePlacement();
+          drawScene();
+          updateBatchNavigation();
+          renderBatchTaskList();
+          setStatus(`当前图片：${targetTask.fileName} (${index + 1}/${batchState.tasks.length})`);
+        },
+      });
+    };
+    image.onerror = () => {
+      setStatus(`图片加载失败：${targetTask.fileName}`, "error");
+    };
+    image.src = reader.result;
+  };
+  reader.onerror = () => {
+    setStatus(`读取图片失败：${targetTask.fileName}`, "error");
+  };
+  reader.readAsDataURL(targetTask.file);
+}
+
+function switchToTask(index) {
+  if (!batchState.enabled) {
+    return;
+  }
+
+  if (index === batchState.currentIndex) {
+    return;
+  }
+
+  const currentTask = batchState.tasks[batchState.currentIndex];
+  const currentState = batchState.taskStates[currentTask.id];
+  const hasUnsaved = currentState && !currentState.saved && state.annotations.length > 0;
+
+  if (hasUnsaved) {
+    const confirmMessage = `当前图片“${currentTask.fileName}”有未保存的标注，是否继续切换？\n\n点击“确定”继续切换（未保存的更改会保留在任务中），点击“取消”留在当前页面。`;
+    if (!window.confirm(confirmMessage)) {
+      return;
+    }
+  }
+
+  loadBatchTask(index);
+}
+
+function goToPrevTask() {
+  if (!batchState.enabled || batchState.currentIndex <= 0) {
+    return;
+  }
+  switchToTask(batchState.currentIndex - 1);
+}
+
+function goToNextTask() {
+  if (!batchState.enabled || batchState.currentIndex >= batchState.tasks.length - 1) {
+    return;
+  }
+  switchToTask(batchState.currentIndex + 1);
+}
+
+function updateBatchNavigation() {
+  if (!elements.batchCurrentIndex || !elements.batchTotal || !elements.batchPrev || !elements.batchNext) {
+    return;
+  }
+
+  elements.batchCurrentIndex.textContent = batchState.currentIndex >= 0 ? batchState.currentIndex + 1 : 0;
+  elements.batchTotal.textContent = batchState.tasks.length;
+
+  elements.batchPrev.disabled = batchState.currentIndex <= 0;
+  elements.batchNext.disabled = batchState.currentIndex >= batchState.tasks.length - 1;
+
+  if (elements.batchProgress) {
+    const completedCount = batchState.tasks.filter((task) => {
+      const taskState = batchState.taskStates[task.id];
+      return taskState && taskState.saved;
+    }).length;
+    elements.batchProgress.textContent = `已完成 ${completedCount}/${batchState.tasks.length} 张`;
+  }
+
+  if (elements.batchCompleted) {
+    const completedCount = batchState.tasks.filter((task) => {
+      const taskState = batchState.taskStates[task.id];
+      return taskState && taskState.saved;
+    }).length;
+    elements.batchCompleted.textContent = `已完成 ${completedCount} 张`;
+  }
+}
+
+function renderBatchTaskList() {
+  if (!elements.batchTaskList) {
+    return;
+  }
+
+  if (batchState.tasks.length === 0) {
+    elements.batchTaskList.innerHTML = '<li class="empty-state">暂无批量任务</li>';
+    return;
+  }
+
+  elements.batchTaskList.innerHTML = batchState.tasks
+    .map((task, index) => {
+      const taskState = batchState.taskStates[task.id];
+      const isActive = index === batchState.currentIndex;
+      const isSaved = taskState && taskState.saved;
+      const hasAnnotations = taskState && taskState.annotationCount > 0;
+      const annotationCount = taskState ? taskState.annotationCount : 0;
+
+      let statusIcon = "pending";
+      let statusText = "待处理";
+
+      if (isSaved) {
+        statusIcon = "saved";
+        statusText = "已保存";
+      } else if (hasAnnotations) {
+        statusIcon = "unsaved";
+        statusText = `${annotationCount} 个标注`;
+      }
+
+      const statusSvg = {
+        saved: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"></path></svg>',
+        unsaved: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>',
+        pending: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle></svg>',
+      };
+
+      const activeClass = isActive ? "batch-task-item active" : "batch-task-item";
+
+      return `
+        <li class="${activeClass}" data-batch-index="${index}">
+          <span class="task-index">${index + 1}</span>
+          <div class="task-info">
+            <p class="task-name">${escapeHtml(task.fileName)}</p>
+            <p class="task-meta">${statusText}</p>
+          </div>
+          <span class="task-status ${statusIcon}" title="${statusText}">
+            ${statusSvg[statusIcon]}
+          </span>
+        </li>
+      `;
+    })
+    .join("");
+
+  updateBatchNavigation();
+}
+
+function exitBatchMode() {
+  if (!batchState.enabled) {
+    return;
+  }
+
+  const unsavedTasks = batchState.tasks.filter((task) => {
+    const taskState = batchState.taskStates[task.id];
+    return taskState && !taskState.saved && taskState.annotationCount > 0;
+  });
+
+  if (unsavedTasks.length > 0) {
+    const confirmMessage = `有 ${unsavedTasks.length} 张图片的标注尚未保存，确定要退出批量模式吗？\n\n退出后未保存的标注将会丢失。`;
+    if (!window.confirm(confirmMessage)) {
+      return;
+    }
+  }
+
+  batchState.enabled = false;
+  batchState.tasks = [];
+  batchState.currentIndex = -1;
+  batchState.taskStates = {};
+  batchState.shareScale = false;
+  batchState.sharedScale = null;
+  batchState.applyProjectToAll = false;
+
+  if (elements.batchPanel) {
+    elements.batchPanel.classList.add("hidden");
+  }
+
+  resetSessionStateForNewImage();
+  setStatus("已退出批量模式。");
+}
+
+function markCurrentTaskSaved(filePrefix) {
+  if (!batchState.enabled || batchState.currentIndex < 0) {
+    return;
+  }
+
+  const currentTask = batchState.tasks[batchState.currentIndex];
+  if (!currentTask) {
+    return;
+  }
+
+  const taskState = batchState.taskStates[currentTask.id];
+  if (taskState) {
+    taskState.saved = true;
+    taskState.savedPrefix = filePrefix;
+    taskState.annotationCount = state.annotations.length;
+  }
+
+  if (batchState.shareScale && state.scale.enabled) {
+    batchState.sharedScale = structuredClone(state.scale);
+  }
+
+  renderBatchTaskList();
+}
+
+function checkBatchUnsavedChanges() {
+  if (!batchState.enabled) {
+    return false;
+  }
+
+  const unsavedTasks = batchState.tasks.filter((task) => {
+    const taskState = batchState.taskStates[task.id];
+    return taskState && !taskState.saved && taskState.annotationCount > 0;
+  });
+
+  return unsavedTasks.length > 0;
+}
 
 const ctx = elements.canvas.getContext("2d");
 const canvasContainer = elements.canvas.parentElement;
@@ -1823,7 +2244,13 @@ async function saveAnnotations() {
     }
 
     await loadHistoryList();
-    setStatus(`已保存 ${state.annotations.length} 个标注到 data/，前缀：${body.filePrefix}`);
+    
+    if (batchState.enabled) {
+      markCurrentTaskSaved(body.filePrefix);
+      setStatus(`已保存 ${state.annotations.length} 个标注到 data/，前缀：${body.filePrefix}。批量任务：${batchState.currentIndex + 1}/${batchState.tasks.length}`);
+    } else {
+      setStatus(`已保存 ${state.annotations.length} 个标注到 data/，前缀：${body.filePrefix}`);
+    }
   } catch (error) {
     setStatus(error.message || "保存失败。", "error");
   }
@@ -2693,10 +3120,88 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && elements.scaleModalOverlay && !elements.scaleModalOverlay.classList.contains("hidden")) {
     event.preventDefault();
     hideScaleModal();
+    return;
+  }
+
+  if (batchState.enabled) {
+    if (event.key === "ArrowLeft" && !event.ctrlKey && !event.metaKey) {
+      event.preventDefault();
+      goToPrevTask();
+      return;
+    }
+    if (event.key === "ArrowRight" && !event.ctrlKey && !event.metaKey) {
+      event.preventDefault();
+      goToNextTask();
+      return;
+    }
   }
 });
 
 window.addEventListener("resize", syncCanvasSize);
+
+window.addEventListener("beforeunload", (event) => {
+  if (checkBatchUnsavedChanges()) {
+    event.preventDefault();
+    event.returnValue = "您有未保存的标注更改，确定要离开吗？";
+    return event.returnValue;
+  }
+});
+
+if (elements.batchImageLoader) {
+  elements.batchImageLoader.addEventListener("change", (event) => {
+    const files = event.target.files;
+    if (files && files.length > 0) {
+      startBatchMode(files);
+    }
+    event.target.value = "";
+  });
+}
+
+if (elements.batchPrev) {
+  elements.batchPrev.addEventListener("click", () => {
+    goToPrevTask();
+  });
+}
+
+if (elements.batchNext) {
+  elements.batchNext.addEventListener("click", () => {
+    goToNextTask();
+  });
+}
+
+if (elements.exitBatch) {
+  elements.exitBatch.addEventListener("click", () => {
+    exitBatchMode();
+  });
+}
+
+if (elements.batchTaskList) {
+  elements.batchTaskList.addEventListener("click", (event) => {
+    const item = event.target.closest("[data-batch-index]");
+    if (!item) {
+      return;
+    }
+    const index = parseInt(item.dataset.batchIndex, 10);
+    if (!isNaN(index)) {
+      switchToTask(index);
+    }
+  });
+}
+
+if (elements.shareScale) {
+  elements.shareScale.addEventListener("change", () => {
+    batchState.shareScale = elements.shareScale.checked;
+    if (batchState.shareScale && state.scale.enabled) {
+      batchState.sharedScale = structuredClone(state.scale);
+    }
+  });
+}
+
+if (elements.applyProjectToAll) {
+  elements.applyProjectToAll.addEventListener("change", () => {
+    batchState.applyProjectToAll = elements.applyProjectToAll.checked;
+  });
+}
 
 renderAnnotationList();
 updateToolButtons();
