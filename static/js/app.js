@@ -82,6 +82,8 @@ const elements = {
   scaleModalOverlay: document.querySelector("#scale-modal-overlay"),
   scaleLengthInput: document.querySelector("#scale-length"),
   scaleUnitSelect: document.querySelector("#scale-unit"),
+  scaleUnitCustomRow: document.querySelector("#scale-unit-custom-row"),
+  scaleUnitCustomInput: document.querySelector("#scale-unit-custom"),
   scalePreviewLength: document.querySelector("#scale-preview-length"),
   scaleCancel: document.querySelector("#scale-cancel"),
   scaleConfirm: document.querySelector("#scale-confirm"),
@@ -112,13 +114,7 @@ const state = {
   editOriginalAnnotation: null,
   editStartPoint: null,
   displayMode: "fit",
-  scale: {
-    enabled: false,
-    pixels: 0,
-    realLength: 0,
-    unit: "cm",
-    pixelPerUnit: 0,
-  },
+  scale: createDefaultScaleState(),
   scaleLinePoints: [],
   scaleDraft: null,
   pendingScalePixels: 0,
@@ -126,6 +122,7 @@ const state = {
 
 const ctx = elements.canvas.getContext("2d");
 const canvasContainer = elements.canvas.parentElement;
+const presetScaleUnits = new Set(["mm", "cm", "m", "in", "ft"]);
 
 function getDevicePixelRatio() {
   return Math.max(1, window.devicePixelRatio || 1);
@@ -747,10 +744,69 @@ function getPolygonCentroid(points) {
   };
 }
 
+function normalizeScaleUnit(unit) {
+  const normalized = String(unit ?? "").trim();
+  return normalized || "cm";
+}
+
+function isPresetScaleUnit(unit) {
+  return presetScaleUnits.has(normalizeScaleUnit(unit));
+}
+
+function syncScaleUnitInputs(unit = "cm") {
+  if (!elements.scaleUnitSelect || !elements.scaleUnitCustomRow || !elements.scaleUnitCustomInput) {
+    return;
+  }
+
+  if (String(unit ?? "").trim() === "custom") {
+    elements.scaleUnitSelect.value = "custom";
+    elements.scaleUnitCustomRow.classList.remove("hidden");
+    return;
+  }
+
+  const normalized = normalizeScaleUnit(unit);
+  if (isPresetScaleUnit(normalized)) {
+    elements.scaleUnitSelect.value = normalized;
+    elements.scaleUnitCustomInput.value = "";
+    elements.scaleUnitCustomRow.classList.add("hidden");
+    return;
+  }
+
+  elements.scaleUnitSelect.value = "custom";
+  elements.scaleUnitCustomInput.value = normalized;
+  elements.scaleUnitCustomRow.classList.remove("hidden");
+}
+
+function getSelectedScaleUnit() {
+  if (!elements.scaleUnitSelect) {
+    return "cm";
+  }
+
+  if (elements.scaleUnitSelect.value === "custom") {
+    return normalizeScaleUnit(elements.scaleUnitCustomInput?.value);
+  }
+
+  return normalizeScaleUnit(elements.scaleUnitSelect.value);
+}
+
+function createDefaultScaleState(unit = "cm") {
+  return {
+    enabled: false,
+    pixels: 0,
+    realLength: 0,
+    unit: normalizeScaleUnit(unit),
+    pixelPerUnit: 0,
+  };
+}
+
+function hasActiveScale() {
+  return state.scale.enabled && state.scale.pixelPerUnit > 0;
+}
+
 function getAnnotationLabel(annotation) {
   const prefix = annotation.name ? `${annotation.name} · ` : "";
-  const scaleEnabled = state.scale.enabled && state.scale.pixelPerUnit > 0;
-  const unit = state.scale.unit;
+  const scaleEnabled = hasActiveScale();
+  const unit = getUnitLabel(state.scale.unit);
 
   if (annotation.type === "line") {
     const pixelLabel = `${Math.round(annotation.length)} px`;
@@ -794,8 +850,8 @@ function getAnnotationLabel(annotation) {
 
 function getAnnotationSummary(annotation) {
   const prefix = annotation.name ? `${annotation.name} · ` : "";
-  const scaleEnabled = state.scale.enabled && state.scale.pixelPerUnit > 0;
-  const unit = state.scale.unit;
+  const scaleEnabled = hasActiveScale();
+  const unit = getUnitLabel(state.scale.unit);
 
   if (annotation.type === "line") {
     const pixelLength = Math.round(annotation.length);
@@ -873,14 +929,7 @@ function getAnnotationSummary(annotation) {
 }
 
 function getUnitLabel(unit) {
-  const labels = {
-    mm: "mm",
-    cm: "cm",
-    m: "m",
-    in: "in",
-    ft: "ft",
-  };
-  return labels[unit] || "cm";
+  return normalizeScaleUnit(unit);
 }
 
 function getRealLength(pixelLength) {
@@ -961,8 +1010,9 @@ function updateScalePanel() {
     elements.scaleInfo.classList.add("hidden");
     elements.scaleStatus.textContent = "未标定";
     elements.scalePixels.textContent = "0 px";
-    elements.scaleReal.textContent = "0 cm";
-    elements.scaleRatio.textContent = "0 px/cm";
+    const unitLabel = getUnitLabel(state.scale.unit);
+    elements.scaleReal.textContent = `0 ${unitLabel}`;
+    elements.scaleRatio.textContent = `0 px/${unitLabel}`;
     elements.scaleHint.textContent = "在图片上绘制一条已知长度的参考线，建立像素与真实单位的换算关系。";
   }
 }
@@ -974,13 +1024,7 @@ function resetScaleState() {
 }
 
 function clearScale() {
-  state.scale = {
-    enabled: false,
-    pixels: 0,
-    realLength: 0,
-    unit: "cm",
-    pixelPerUnit: 0,
-  };
+  state.scale = createDefaultScaleState(state.scale.unit);
   resetScaleState();
   updateScalePanel();
   renderAnnotationList();
@@ -995,7 +1039,7 @@ function showScaleModal(pixelLength) {
 
   state.pendingScalePixels = pixelLength;
   elements.scaleLengthInput.value = "";
-  elements.scaleUnitSelect.value = "cm";
+  syncScaleUnitInputs(state.scale.enabled ? state.scale.unit : "cm");
   elements.scalePreviewLength.textContent = `${Math.round(pixelLength)} px`;
   elements.scaleModalOverlay.classList.remove("hidden");
   elements.scaleLengthInput.focus();
@@ -1015,11 +1059,17 @@ function confirmScale() {
   }
 
   const length = parseFloat(elements.scaleLengthInput.value);
-  const unit = elements.scaleUnitSelect.value;
+  const unit = getSelectedScaleUnit();
   const pendingPixels = state.pendingScalePixels;
 
   if (isNaN(length) || length <= 0) {
     setStatus("请输入有效的真实长度值。", "error");
+    return;
+  }
+
+  if (elements.scaleUnitSelect.value === "custom" && !(elements.scaleUnitCustomInput?.value || "").trim()) {
+    setStatus("请输入自定义单位。", "error");
+    elements.scaleUnitCustomInput?.focus();
     return;
   }
 
@@ -1369,13 +1419,7 @@ function resetSessionStateForNewImage() {
   state.imageOffset = { x: 0, y: 0 };
   state.displayMode = "fit";
   state.originalImageDataUrl = null;
-  state.scale = {
-    enabled: false,
-    pixels: 0,
-    realLength: 0,
-    unit: "cm",
-    pixelPerUnit: 0,
-  };
+  state.scale = createDefaultScaleState();
   resetDraftState();
   resetScaleState();
   renderAnnotationList();
@@ -1574,6 +1618,43 @@ function downloadAnnotatedImage() {
   setStatus(`已导出标注图：${link.download}`);
 }
 
+function roundMetric(value, digits = 4) {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return undefined;
+  }
+  return Number(value.toFixed(digits));
+}
+
+function serializeRealMetrics(annotation) {
+  if (!hasActiveScale()) {
+    return undefined;
+  }
+
+  const realMetrics = {
+    unit: getUnitLabel(state.scale.unit),
+  };
+
+  if (annotation.type === "rectangle") {
+    realMetrics.width = roundMetric(getRealLength(annotation.width));
+    realMetrics.height = roundMetric(getRealLength(annotation.height));
+    realMetrics.area = roundMetric(getRealArea(annotation.area));
+    return realMetrics;
+  }
+
+  if (annotation.type === "line" || annotation.type === "brush") {
+    realMetrics.length = roundMetric(getRealLength(annotation.length));
+    return realMetrics;
+  }
+
+  if (annotation.type === "polygon") {
+    realMetrics.area = roundMetric(getRealArea(annotation.area));
+    realMetrics.perimeter = roundMetric(getRealLength(annotation.perimeter));
+    return realMetrics;
+  }
+
+  return undefined;
+}
+
 function serializeAnnotations() {
   return state.annotations.map((annotation) => ({
     id: annotation.id,
@@ -1592,6 +1673,7 @@ function serializeAnnotations() {
           y: Number(point.y.toFixed(2)),
         }))
       : undefined,
+    realMetrics: serializeRealMetrics(annotation),
   }));
 }
 
@@ -1651,7 +1733,7 @@ async function saveAnnotations() {
           pixels: Number(state.scale.pixels.toFixed(2)),
           realLength: Number(state.scale.realLength.toFixed(4)),
           unit: state.scale.unit,
-          pixelPerUnit: Number(state.scale.pixelPerUnit.toFixed(4)),
+          pixelPerUnit: Number(state.scale.pixelPerUnit.toFixed(8)),
         }
       : undefined,
     annotations: serializeAnnotations(),
@@ -1771,17 +1853,11 @@ async function loadSession(filePrefix) {
         enabled: Boolean(body.scale.enabled),
         pixels: Number(body.scale.pixels) || 0,
         realLength: Number(body.scale.realLength) || 0,
-        unit: String(body.scale.unit || "cm"),
+        unit: normalizeScaleUnit(body.scale.unit),
         pixelPerUnit: Number(body.scale.pixelPerUnit) || 0,
       };
     } else {
-      state.scale = {
-        enabled: false,
-        pixels: 0,
-        realLength: 0,
-        unit: "cm",
-        pixelPerUnit: 0,
-      };
+      state.scale = createDefaultScaleState();
     }
 
     resetDraftState();
@@ -2512,8 +2588,29 @@ if (elements.scaleConfirm) {
   });
 }
 
+if (elements.scaleUnitSelect) {
+  elements.scaleUnitSelect.addEventListener("change", () => {
+    syncScaleUnitInputs(elements.scaleUnitSelect.value);
+    if (elements.scaleUnitSelect.value === "custom") {
+      elements.scaleUnitCustomInput?.focus();
+    }
+  });
+}
+
 if (elements.scaleLengthInput) {
   elements.scaleLengthInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      confirmScale();
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      hideScaleModal();
+    }
+  });
+}
+
+if (elements.scaleUnitCustomInput) {
+  elements.scaleUnitCustomInput.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
       event.preventDefault();
       confirmScale();
@@ -2537,6 +2634,7 @@ renderAnnotationList();
 updateToolButtons();
 updateDisplayModeButtons();
 updateImagePositionDisplay();
+syncScaleUnitInputs(state.scale.unit);
 updateScalePanel();
 refreshOverlay();
 syncCanvasSize();

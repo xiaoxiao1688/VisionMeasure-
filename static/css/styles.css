@@ -787,6 +787,7 @@ textarea {
 }
 
 .scale-input-row input[type="number"],
+.scale-input-row input[type="text"],
 .scale-input-row select {
   width: 100%;
   padding: 12px 14px;

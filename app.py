@@ -81,6 +81,41 @@ def _save_base64_image(base64_data: str, output_path: Path) -> bool:
         return False
 
 
+def _to_float(value: object) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalize_scale(scale_payload: object) -> dict[str, object] | None:
+    if not isinstance(scale_payload, dict) or not bool(scale_payload.get("enabled")):
+        return None
+
+    pixels = _to_float(scale_payload.get("pixels"))
+    real_length = _to_float(scale_payload.get("realLength"))
+    pixel_per_unit = _to_float(scale_payload.get("pixelPerUnit"))
+    unit = str(scale_payload.get("unit") or "").strip() or "cm"
+
+    if (
+        pixels is None
+        or real_length is None
+        or pixel_per_unit is None
+        or pixels <= 0
+        or real_length <= 0
+        or pixel_per_unit <= 0
+    ):
+        return None
+
+    return {
+        "enabled": True,
+        "pixels": round(pixels, 2),
+        "realLength": round(real_length, 4),
+        "unit": unit,
+        "pixelPerUnit": round(pixel_per_unit, 6),
+    }
+
+
 def _load_base64_image(path: Path | None) -> str | None:
     if not path or not path.exists():
         return None
@@ -224,6 +259,8 @@ def save_annotations():
         if _save_base64_image(annotated_image, annotated_path):
             saved_files.append(annotated_path.name)
 
+    scale = _normalize_scale(payload.get("scale"))
+
     document = {
         "projectName": project_name,
         "projectNotes": project_notes,
@@ -233,6 +270,8 @@ def save_annotations():
         "imageMeta": payload.get("imageMeta", {}),
         "annotations": annotations,
     }
+    if scale is not None:
+        document["scale"] = scale
 
     json_path = DATA_DIR / f"{file_prefix}.json"
     json_path.write_text(json.dumps(document, indent=2, ensure_ascii=True), encoding="utf-8")
