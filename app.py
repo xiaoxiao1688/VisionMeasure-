@@ -174,6 +174,7 @@ def list_sessions():
                 "taskIndex": content.get("taskIndex"),
                 "totalTasks": content.get("totalTasks"),
                 "shareScale": content.get("shareScale", False),
+                "applyProjectToAll": content.get("applyProjectToAll", False),
             }
 
         sessions.append(
@@ -227,6 +228,8 @@ def get_session(file_prefix: str):
             content["totalTasks"] = 1
         if "shareScale" not in content:
             content["shareScale"] = False
+        if "applyProjectToAll" not in content:
+            content["applyProjectToAll"] = False
         if "sharedScale" not in content:
             content["sharedScale"] = None
     
@@ -262,9 +265,11 @@ def get_batch(batch_id: str):
             "exportFilename": content.get("exportFilename", ""),
             "hasOriginalImage": _find_saved_image(file_prefix, "-original") is not None,
             "hasAnnotatedImage": _find_saved_image(file_prefix, "-annotated") is not None,
+            "imageMeta": image_meta,
             "taskIndex": content.get("taskIndex", 0),
             "totalTasks": content.get("totalTasks", 1),
             "shareScale": content.get("shareScale", False),
+            "applyProjectToAll": content.get("applyProjectToAll", False),
             "scale": content.get("scale"),
             "sharedScale": content.get("sharedScale"),
         })
@@ -279,6 +284,7 @@ def get_batch(batch_id: str):
             "totalTasks": len(batch_tasks),
             "savedTasks": len(batch_tasks),
             "shareScale": first_task.get("shareScale", False),
+            "applyProjectToAll": first_task.get("applyProjectToAll", False),
         }
 
     return jsonify({
@@ -374,6 +380,7 @@ def save_annotations():
         document["taskIndex"] = payload.get("taskIndex", 0)
         document["totalTasks"] = payload.get("totalTasks", 1)
         document["shareScale"] = bool(payload.get("shareScale", False))
+        document["applyProjectToAll"] = bool(payload.get("applyProjectToAll", False))
         
         shared_scale = _normalize_scale(payload.get("sharedScale"))
         if shared_scale is not None:

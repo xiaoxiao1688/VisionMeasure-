@@ -138,9 +138,93 @@ const session = {
   batchName: null,
   shareScale: false,
   sharedScale: null,
+  applyProjectToAll: false,
   currentTaskIndex: 0,
   tasks: [],
 };
+
+function normalizeImageTags(value) {
+  if (Array.isArray(value)) {
+    return value.map((tag) => String(tag).trim()).filter(Boolean);
+  }
+
+  if (typeof value === "string") {
+    return value
+      .split(",")
+      .map((tag) => tag.trim())
+      .filter(Boolean);
+  }
+
+  return [];
+}
+
+function readProjectSettingsFromForm() {
+  return {
+    projectName: elements.projectName.value.trim() || "GeoDraft Prototype",
+    projectNotes: elements.projectNotes.value.trim(),
+    exportFilename: elements.exportFilename.value.trim(),
+    imageTags: normalizeImageTags(elements.imageTags.value),
+  };
+}
+
+function applyProjectSettingsToForm(settings = {}) {
+  elements.projectName.value = settings.projectName || "GeoDraft Prototype";
+  elements.projectNotes.value = settings.projectNotes || "";
+  elements.exportFilename.value = settings.exportFilename || "";
+  elements.imageTags.value = normalizeImageTags(settings.imageTags).join(", ");
+}
+
+function createTaskProjectSettings(source = {}) {
+  return {
+    projectName: source.projectName || "GeoDraft Prototype",
+    projectNotes: source.projectNotes || "",
+    exportFilename: source.exportFilename || "",
+    imageTags: normalizeImageTags(source.imageTags),
+  };
+}
+
+function syncTaskProjectSettingsFromForm(task) {
+  if (!task) {
+    return;
+  }
+  Object.assign(task, createTaskProjectSettings(readProjectSettingsFromForm()));
+}
+
+function syncProjectSettingsFromTask(task) {
+  if (!task) {
+    return;
+  }
+  applyProjectSettingsToForm(task);
+}
+
+function applyProjectSettingsToAllTasks(settings = readProjectSettingsFromForm()) {
+  const normalized = createTaskProjectSettings(settings);
+  session.tasks.forEach((task) => Object.assign(task, structuredClone(normalized)));
+}
+
+function syncSharedScaleToAllTasks(scale = state.scale) {
+  const normalizedScale = structuredClone(scale);
+  session.sharedScale = normalizedScale;
+  session.tasks.forEach((task) => {
+    task.scale = structuredClone(normalizedScale);
+  });
+}
+
+function handleBatchProjectSettingsChanged() {
+  if (!session.isBatchSession) {
+    return;
+  }
+
+  const currentTask = getCurrentTask();
+  if (!currentTask) {
+    return;
+  }
+
+  syncTaskProjectSettingsFromForm(currentTask);
+  if (session.applyProjectToAll) {
+    applyProjectSettingsToAllTasks(currentTask);
+  }
+}
 
 function createTaskFromFile(file) {
   return {
@@ -148,6 +232,7 @@ function createTaskFromFile(file) {
     fileName: file.name,
     imageFile: file,
     imageDataUrl: null,
+    originalImageDataUrl: null,
     imageMeta: null,
     loaded: false,
     annotations: [],
@@ -156,6 +241,7 @@ function createTaskFromFile(file) {
     imageOffset: { x: 0, y: 0 },
     displayMode: "fit",
     scale: createDefaultScaleState(),
+    ...createTaskProjectSettings(readProjectSettingsFromForm()),
     saved: false,
     savedPrefix: null,
     savedAt: null,
@@ -187,15 +273,22 @@ function createTaskFromHistory(historyTaskData, fullSessionData = null) {
     taskId: crypto.randomUUID(),
     fileName: imageMeta.name || historyTaskData.imageName || "历史图片",
     imageFile: null,
-    imageDataUrl: null,
+    imageDataUrl: fullSessionData ? fullSessionData.originalImage || fullSessionData.annotatedImage || null : null,
+    originalImageDataUrl: fullSessionData ? fullSessionData.originalImage || null : null,
     imageMeta: imageMeta,
-    loaded: false,
+    loaded: Boolean(fullSessionData && (fullSessionData.originalImage || fullSessionData.annotatedImage)),
     annotations: annotations,
     selectedId: null,
     undoStack: [],
     imageOffset: { x: 0, y: 0 },
     displayMode: "fit",
     scale: taskScale,
+    ...createTaskProjectSettings({
+      projectName: fullSessionData?.projectName || historyTaskData.projectName,
+      projectNotes: fullSessionData?.projectNotes || historyTaskData.notes,
+      exportFilename: fullSessionData?.exportFilename || historyTaskData.exportFilename,
+      imageTags: fullSessionData?.imageTags || historyTaskData.imageTags,
+    }),
     saved: true,
     savedPrefix: historyTaskData.filePrefix || null,
     savedAt: historyTaskData.savedAt || null,
@@ -218,7 +311,9 @@ function syncStateFromTask(task) {
   state.scale = session.shareScale && session.sharedScale 
     ? structuredClone(session.sharedScale) 
     : structuredClone(task.scale);
+  state.originalImageDataUrl = task.originalImageDataUrl || null;
   state.currentSessionPrefix = task.savedPrefix;
+  syncProjectSettingsFromTask(task);
 }
 
 function syncTaskFromState(task) {
@@ -231,12 +326,10 @@ function syncTaskFromState(task) {
   task.undoStack = structuredClone(state.undoStack);
   task.imageOffset = { ...state.imageOffset };
   task.displayMode = state.displayMode;
-  
-  if (!session.shareScale) {
-    task.scale = structuredClone(state.scale);
-  }
-  
+  task.scale = structuredClone(state.scale);
+  task.originalImageDataUrl = state.originalImageDataUrl;
   task.savedPrefix = state.currentSessionPrefix;
+  syncTaskProjectSettingsFromForm(task);
 }
 
 function getCurrentTask() {
@@ -283,6 +376,9 @@ function updateBatchUI() {
 
   if (elements.shareScale) {
     elements.shareScale.checked = session.shareScale;
+  }
+  if (elements.applyProjectToAll) {
+    elements.applyProjectToAll.checked = session.applyProjectToAll;
   }
 }
 
@@ -361,6 +457,9 @@ function loadTaskAtIndex(index) {
   const currentTask = getCurrentTask();
   if (currentTask) {
     syncTaskFromState(currentTask);
+    if (session.applyProjectToAll) {
+      applyProjectSettingsToAllTasks(currentTask);
+    }
   }
 
   const targetTask = session.tasks[index];
@@ -394,9 +493,34 @@ function loadTaskAtIndex(index) {
     return;
   }
 
+  if (!targetTask.imageFile) {
+    state.image = null;
+    state.imageName = targetTask.fileName || targetTask.imageMeta?.name || "";
+    state.imageFile = null;
+    state.imagePlacement = null;
+    elements.fileName.textContent = state.imageName || "未恢复原图";
+    elements.imageSize.textContent =
+      targetTask.imageMeta?.width && targetTask.imageMeta?.height
+        ? `${targetTask.imageMeta.width} × ${targetTask.imageMeta.height}`
+        : "无文件";
+    renderAnnotationList();
+    updateAnnotationNameEditor();
+    updateDisplayModeButtons();
+    updateImagePositionDisplay();
+    updateToolButtons();
+    updateScalePanel();
+    refreshOverlay();
+    drawScene();
+    updateBatchUI();
+    renderBatchTaskList();
+    setStatus(`已切换到 ${targetTask.fileName}，但未找到原图，请重新选择图片。`, "error");
+    return;
+  }
+
   const reader = new FileReader();
   reader.onload = () => {
     targetTask.imageDataUrl = reader.result;
+    targetTask.originalImageDataUrl = reader.result;
     targetTask.loaded = true;
 
     const image = new Image();
@@ -494,9 +618,16 @@ function startBatchSession(files) {
   session.batchId = crypto.randomUUID();
   session.batchName = `批量任务 ${new Date().toLocaleString("zh-CN")}`;
   session.shareScale = elements.shareScale ? elements.shareScale.checked : false;
-  session.sharedScale = null;
+  session.sharedScale = session.shareScale && state.scale.enabled ? structuredClone(state.scale) : null;
+  session.applyProjectToAll = elements.applyProjectToAll ? elements.applyProjectToAll.checked : false;
   session.currentTaskIndex = 0;
   session.tasks = imageFiles.map((file) => createTaskFromFile(file));
+  if (session.applyProjectToAll) {
+    applyProjectSettingsToAllTasks();
+  }
+  if (session.shareScale && session.sharedScale) {
+    syncSharedScaleToAllTasks(session.sharedScale);
+  }
 
   updateBatchUI();
   loadTaskAtIndex(0);
@@ -521,6 +652,7 @@ function exitBatchSession() {
   session.batchName = null;
   session.shareScale = false;
   session.sharedScale = null;
+  session.applyProjectToAll = false;
   session.currentTaskIndex = 0;
   session.tasks = [];
 
@@ -540,8 +672,8 @@ function markCurrentTaskAsSaved(filePrefix) {
   currentTask.savedPrefix = filePrefix;
   currentTask.savedAt = new Date().toISOString();
 
-  if (session.shareScale && state.scale.enabled) {
-    session.sharedScale = structuredClone(state.scale);
+  if (session.shareScale) {
+    syncSharedScaleToAllTasks(state.scale);
   }
 
   renderBatchTaskList();
@@ -1463,6 +1595,9 @@ function resetScaleState() {
 
 function clearScale() {
   state.scale = createDefaultScaleState(state.scale.unit);
+  if (session.isBatchSession && session.shareScale) {
+    syncSharedScaleToAllTasks(state.scale);
+  }
   resetScaleState();
   updateScalePanel();
   renderAnnotationList();
@@ -1518,6 +1653,9 @@ function confirmScale() {
     unit: unit,
     pixelPerUnit: pendingPixels / length,
   };
+  if (session.isBatchSession && session.shareScale) {
+    syncSharedScaleToAllTasks(state.scale);
+  }
 
   if (elements.scaleModalOverlay) {
     elements.scaleModalOverlay.classList.add("hidden");
@@ -2218,6 +2356,16 @@ async function saveAnnotations() {
     }
   }
 
+  if (session.isBatchSession) {
+    const currentTask = getCurrentTask();
+    if (currentTask) {
+      syncTaskFromState(currentTask);
+      if (session.applyProjectToAll) {
+        applyProjectSettingsToAllTasks(currentTask);
+      }
+    }
+  }
+
   const imageTags = elements.imageTags.value
     .split(",")
     .map((tag) => tag.trim())
@@ -2254,6 +2402,7 @@ async function saveAnnotations() {
     payload.taskIndex = session.currentTaskIndex;
     payload.totalTasks = session.tasks.length;
     payload.shareScale = session.shareScale;
+    payload.applyProjectToAll = session.applyProjectToAll;
     if (session.sharedScale) {
       payload.sharedScale = {
         enabled: session.sharedScale.enabled,
@@ -2392,7 +2541,7 @@ async function loadSession(filePrefix) {
         );
 
         if (choice) {
-          await loadBatchSessionFromHistory(batchData, body);
+          await loadBatchSessionFromHistory(batchData, body, filePrefix);
           return;
         }
       }
@@ -2411,6 +2560,8 @@ function loadSingleTaskFromHistory(body, filePrefix) {
     }
     exitBatchSession();
   }
+
+  session.applyProjectToAll = false;
 
   elements.projectName.value = body.projectName || "GeoDraft Prototype";
   elements.projectNotes.value = body.projectNotes || "";
@@ -2475,7 +2626,7 @@ function loadSingleTaskFromHistory(body, filePrefix) {
   setStatus("标注数据已恢复，但没有找到图片文件，请重新选择原图。", "error");
 }
 
-async function loadBatchSessionFromHistory(batchData, currentTaskData) {
+async function loadBatchSessionFromHistory(batchData, currentTaskData, currentFilePrefix) {
   if (hasAnyUnsavedChanges()) {
     if (!window.confirm("当前有未保存的更改，恢复批次历史项目将丢失这些更改。是否继续？")) {
       return;
@@ -2493,7 +2644,8 @@ async function loadBatchSessionFromHistory(batchData, currentTaskData) {
   session.isBatchSession = true;
   session.batchId = batchData.batchId;
   session.batchName = currentTaskData.batchName || `历史批次 ${batchData.batchId.slice(0, 8)}`;
-  session.shareScale = Boolean(batchInfo.shareScale || currentTaskData.shareScale);
+  session.shareScale = Boolean(batchInfo.shareScale ?? currentTaskData.shareScale);
+  session.applyProjectToAll = Boolean(batchInfo.applyProjectToAll ?? currentTaskData.applyProjectToAll);
   
   if (currentTaskData.sharedScale && currentTaskData.sharedScale.enabled) {
     session.sharedScale = {
@@ -2514,8 +2666,7 @@ async function loadBatchSessionFromHistory(batchData, currentTaskData) {
     const taskInfo = tasks[i];
     let fullTaskData = null;
 
-    if (taskInfo.filePrefix === currentTaskData.currentSessionPrefix || 
-        (currentTaskData.savedAtUtc && taskInfo.savedAt === currentTaskData.savedAtUtc)) {
+    if (taskInfo.filePrefix === currentFilePrefix) {
       fullTaskData = currentTaskData;
       currentTaskIndex = i;
     } else {
@@ -2548,11 +2699,25 @@ async function loadBatchSessionFromHistory(batchData, currentTaskData) {
     session.tasks.push(task);
   }
 
-  elements.projectName.value = currentTaskData.projectName || "GeoDraft Prototype";
-  elements.projectNotes.value = currentTaskData.projectNotes || "";
-  elements.exportFilename.value = currentTaskData.exportFilename || "";
+  if (session.shareScale && !session.sharedScale) {
+    const fallbackTask = session.tasks[currentTaskIndex] || session.tasks[0];
+    if (fallbackTask) {
+      syncSharedScaleToAllTasks(fallbackTask.scale);
+    }
+  }
 
   session.currentTaskIndex = currentTaskIndex;
+
+  updateBatchUI();
+  renderBatchTaskList();
+  loadTaskAtIndex(currentTaskIndex);
+
+  let message = `宸叉仮澶嶆壒娆★細鍏?${session.tasks.length} 寮犲浘鐗囷紝褰撳墠鍦ㄧ ${currentTaskIndex + 1} 寮燻`;
+  if (session.shareScale && session.sharedScale && session.sharedScale.enabled) {
+    message += `锛屾瘮渚嬫爣瀹氬凡澶嶇敤`;
+  }
+  setStatus(message);
+  return;
 
   updateBatchUI();
   
@@ -3393,12 +3558,11 @@ if (elements.batchTaskList) {
 
 if (elements.shareScale) {
   elements.shareScale.addEventListener("change", () => {
-    const wasSharing = session.shareScale;
     session.shareScale = elements.shareScale.checked;
     
     if (session.shareScale) {
       if (state.scale.enabled) {
-        session.sharedScale = structuredClone(state.scale);
+        syncSharedScaleToAllTasks(state.scale);
         setStatus(`已启用比例复用，当前比例 ${Math.round(state.scale.pixels)} px = ${formatRealLength(state.scale.realLength, state.scale.unit)} 将应用到所有图片`);
       } else {
         session.sharedScale = null;
@@ -3407,6 +3571,7 @@ if (elements.shareScale) {
     } else {
       const currentTask = getCurrentTask();
       if (currentTask) {
+        currentTask.scale = structuredClone(state.scale);
         state.scale = structuredClone(currentTask.scale);
         updateScalePanel();
         setStatus("已关闭比例复用，各图片将使用独立的比例设置");
@@ -3420,13 +3585,25 @@ if (elements.shareScale) {
 
 if (elements.applyProjectToAll) {
   elements.applyProjectToAll.addEventListener("change", () => {
-    if (elements.applyProjectToAll.checked) {
+    session.applyProjectToAll = elements.applyProjectToAll.checked;
+    const currentTask = getCurrentTask();
+    if (currentTask) {
+      syncTaskProjectSettingsFromForm(currentTask);
+    }
+    if (session.applyProjectToAll) {
+      applyProjectSettingsToAllTasks(currentTask || readProjectSettingsFromForm());
       setStatus("已启用项目设置复用，保存时将使用当前项目名称和备注");
     } else {
       setStatus("已关闭项目设置复用，各图片可使用独立的项目名称和备注");
     }
+    updateBatchUI();
   });
 }
+
+elements.projectName.addEventListener("input", handleBatchProjectSettingsChanged);
+elements.projectNotes.addEventListener("input", handleBatchProjectSettingsChanged);
+elements.exportFilename.addEventListener("input", handleBatchProjectSettingsChanged);
+elements.imageTags.addEventListener("input", handleBatchProjectSettingsChanged);
 
 renderAnnotationList();
 updateToolButtons();
