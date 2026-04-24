@@ -369,6 +369,18 @@ def save_annotations():
         "imageMeta": payload.get("imageMeta", {}),
         "annotations": annotations,
     }
+    templates = payload.get("templates")
+    if isinstance(templates, list):
+        document["templates"] = templates
+
+    active_template_id = payload.get("activeTemplateId")
+    if active_template_id is None or isinstance(active_template_id, str):
+        document["activeTemplateId"] = active_template_id
+
+    active_category_id = payload.get("activeCategoryId")
+    if active_category_id is None or isinstance(active_category_id, str):
+        document["activeCategoryId"] = active_category_id
+
     if scale is not None:
         document["scale"] = scale
 

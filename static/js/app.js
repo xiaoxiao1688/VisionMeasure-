@@ -278,7 +278,24 @@ function normalizeLoadedTemplates(templates) {
     return generateDefaultTemplates();
   }
   const normalized = templates.map(normalizeLoadedTemplate).filter(Boolean);
-  return normalized.length > 0 ? normalized : generateDefaultTemplates();
+  if (normalized.length === 0) {
+    return generateDefaultTemplates();
+  }
+
+  let foundDefault = false;
+  normalized.forEach((template) => {
+    if (template.isDefault && !foundDefault) {
+      foundDefault = true;
+      return;
+    }
+    template.isDefault = false;
+  });
+
+  if (!foundDefault) {
+    normalized[0].isDefault = true;
+  }
+
+  return normalized;
 }
 
 const templatesState = {
@@ -286,6 +303,60 @@ const templatesState = {
   activeTemplateId: null,
   activeCategoryId: null,
 };
+
+function syncToolToActiveCategory() {
+  const activeCategory = getActiveCategory();
+  if (activeCategory) {
+    state.currentTool = activeCategory.shapeType;
+  }
+}
+
+function syncTemplateSelection(preferredTemplateId = null, preferredCategoryId = null) {
+  if (!templatesState.templates.length) {
+    templatesState.activeTemplateId = null;
+    templatesState.activeCategoryId = null;
+    return null;
+  }
+
+  let template = preferredTemplateId
+    ? templatesState.templates.find((item) => item.id === preferredTemplateId)
+    : null;
+
+  if (!template) {
+    template = templatesState.templates.find((item) => item.isDefault) || templatesState.templates[0];
+  }
+
+  templatesState.activeTemplateId = template ? template.id : null;
+
+  if (!template) {
+    templatesState.activeCategoryId = null;
+    return null;
+  }
+
+  let category = preferredCategoryId
+    ? template.categories.find((item) => item.id === preferredCategoryId)
+    : null;
+
+  if (!category) {
+    category = template.categories[0] || null;
+  }
+
+  templatesState.activeCategoryId = category ? category.id : null;
+  syncToolToActiveCategory();
+  return template;
+}
+
+function applyTemplatesState(serializedTemplates, preferredTemplateId = null, preferredCategoryId = null, options = {}) {
+  const { preserveCurrentOnMissing = false } = options;
+
+  if (Array.isArray(serializedTemplates) && serializedTemplates.length > 0) {
+    templatesState.templates = normalizeLoadedTemplates(serializedTemplates);
+  } else if (!preserveCurrentOnMissing) {
+    templatesState.templates = generateDefaultTemplates();
+  }
+
+  return syncTemplateSelection(preferredTemplateId, preferredCategoryId);
+}
 
 function getActiveTemplate() {
   if (!templatesState.activeTemplateId) {
@@ -311,8 +382,7 @@ function setActiveTemplate(templateId) {
   if (!template) {
     return false;
   }
-  templatesState.activeTemplateId = templateId;
-  templatesState.activeCategoryId = template.categories.length > 0 ? template.categories[0].id : null;
+  syncTemplateSelection(templateId, template.categories.length > 0 ? template.categories[0].id : null);
   renderTemplateList();
   renderCategoryList();
   updateToolButtons();
@@ -328,8 +398,7 @@ function setActiveCategory(categoryId) {
   if (!category) {
     return false;
   }
-  templatesState.activeCategoryId = categoryId;
-  state.currentTool = category.shapeType;
+  syncTemplateSelection(template.id, categoryId);
   renderCategoryList();
   updateToolButtons();
   setStatus(`已选择类别：${category.name}，工具：${category.shapeType === "rectangle" ? "矩形" : category.shapeType === "polygon" ? "多边形" : category.shapeType === "line" ? "折线" : "画笔"}`);
@@ -338,8 +407,11 @@ function setActiveCategory(categoryId) {
 
 function addTemplate(template) {
   templatesState.templates.push(template);
+  templatesState.templates = normalizeLoadedTemplates(templatesState.templates);
+  syncTemplateSelection(template.id, template.categories.length > 0 ? template.categories[0].id : null);
   renderTemplateList();
-  setActiveTemplate(template.id);
+  renderCategoryList();
+  updateToolButtons();
   saveTemplatesToCurrentTask();
 }
 
@@ -358,7 +430,11 @@ function updateTemplate(templateId, updates) {
   }
   
   Object.assign(templatesState.templates[index], updates);
+  templatesState.templates = normalizeLoadedTemplates(templatesState.templates);
+  syncTemplateSelection(templatesState.activeTemplateId, templatesState.activeCategoryId);
   renderTemplateList();
+  renderCategoryList();
+  updateToolButtons();
   saveTemplatesToCurrentTask();
   return true;
 }
@@ -373,13 +449,11 @@ function deleteTemplate(templateId) {
     return false;
   }
   templatesState.templates.splice(index, 1);
-  if (templatesState.activeTemplateId === templateId) {
-    templatesState.activeTemplateId = templatesState.templates[0].id;
-    templatesState.activeCategoryId =
-      templatesState.templates[0].categories.length > 0 ? templatesState.templates[0].categories[0].id : null;
-  }
+  templatesState.templates = normalizeLoadedTemplates(templatesState.templates);
+  syncTemplateSelection(templatesState.activeTemplateId === templateId ? null : templatesState.activeTemplateId, templatesState.activeCategoryId);
   renderTemplateList();
   renderCategoryList();
+  updateToolButtons();
   saveTemplatesToCurrentTask();
   setStatus("已删除模板。");
   return true;
@@ -391,7 +465,13 @@ function addCategory(templateId, category) {
     return false;
   }
   template.categories.push(category);
+  if (templatesState.activeTemplateId === templateId && !templatesState.activeCategoryId) {
+    syncTemplateSelection(templateId, category.id);
+  } else {
+    syncToolToActiveCategory();
+  }
   renderCategoryList();
+  updateToolButtons();
   saveTemplatesToCurrentTask();
   return true;
 }
@@ -406,7 +486,11 @@ function updateCategory(templateId, categoryId, updates) {
     return false;
   }
   Object.assign(category, updates);
+  if (templatesState.activeTemplateId === templateId && templatesState.activeCategoryId === categoryId) {
+    syncToolToActiveCategory();
+  }
   renderCategoryList();
+  updateToolButtons();
   saveTemplatesToCurrentTask();
   return true;
 }
@@ -422,10 +506,12 @@ function deleteCategory(templateId, categoryId) {
   }
   template.categories.splice(index, 1);
   if (templatesState.activeCategoryId === categoryId) {
-    templatesState.activeCategoryId =
-      template.categories.length > 0 ? template.categories[0].id : null;
+    syncTemplateSelection(templateId, template.categories.length > 0 ? template.categories[0].id : null);
+  } else {
+    syncToolToActiveCategory();
   }
   renderCategoryList();
+  updateToolButtons();
   saveTemplatesToCurrentTask();
   setStatus("已删除类别。");
   return true;
@@ -492,29 +578,7 @@ function loadTemplatesFromTask(task) {
   if (!task) {
     return;
   }
-  if (task.templates && task.templates.length > 0) {
-    templatesState.templates = normalizeLoadedTemplates(task.templates);
-  } else {
-    templatesState.templates = generateDefaultTemplates();
-  }
-  if (task.activeTemplateId) {
-    const template = templatesState.templates.find((t) => t.id === task.activeTemplateId);
-    if (template) {
-      templatesState.activeTemplateId = task.activeTemplateId;
-      if (task.activeCategoryId) {
-        const category = template.categories.find((c) => c.id === task.activeCategoryId);
-        templatesState.activeCategoryId = category ? task.activeCategoryId : null;
-      } else {
-        templatesState.activeCategoryId = template.categories.length > 0 ? template.categories[0].id : null;
-      }
-    }
-  } else {
-    templatesState.activeTemplateId = templatesState.templates.length > 0 ? templatesState.templates[0].id : null;
-    templatesState.activeCategoryId =
-      templatesState.templates.length > 0 && templatesState.templates[0].categories.length > 0
-        ? templatesState.templates[0].categories[0].id
-        : null;
-  }
+  applyTemplatesState(task.templates, task.activeTemplateId, task.activeCategoryId);
 }
 
 function serializeTemplates() {
@@ -640,53 +704,14 @@ function loadTemplatesFromStorage() {
     const stored = localStorage.getItem("geodraft_templates");
     if (stored) {
       const data = JSON.parse(stored);
-      if (data.templates && Array.isArray(data.templates)) {
-        templatesState.templates = normalizeLoadedTemplates(data.templates);
-        
-        let defaultCount = templatesState.templates.filter((t) => t.isDefault).length;
-        if (defaultCount > 1) {
-          let foundFirstDefault = false;
-          templatesState.templates.forEach((t) => {
-            if (t.isDefault) {
-              if (foundFirstDefault) {
-                t.isDefault = false;
-              } else {
-                foundFirstDefault = true;
-              }
-            }
-          });
-        }
-        
-        if (data.activeTemplateId) {
-          const template = templatesState.templates.find((t) => t.id === data.activeTemplateId);
-          if (template) {
-            templatesState.activeTemplateId = data.activeTemplateId;
-            if (data.activeCategoryId) {
-              const category = template.categories.find((c) => c.id === data.activeCategoryId);
-              templatesState.activeCategoryId = category ? data.activeCategoryId : null;
-            } else {
-              templatesState.activeCategoryId = template.categories.length > 0 ? template.categories[0].id : null;
-            }
-          }
-        }
-      }
+      applyTemplatesState(data.templates, data.activeTemplateId, data.activeCategoryId, { preserveCurrentOnMissing: true });
     }
-    
-    if (!templatesState.activeTemplateId && templatesState.templates.length > 0) {
-      let defaultTemplate = templatesState.templates.find((t) => t.isDefault);
-      if (!defaultTemplate) {
-        defaultTemplate = templatesState.templates[0];
-      }
-      templatesState.activeTemplateId = defaultTemplate.id;
-      templatesState.activeCategoryId = defaultTemplate.categories.length > 0 ? defaultTemplate.categories[0].id : null;
-    }
+
+    syncTemplateSelection(templatesState.activeTemplateId, templatesState.activeCategoryId);
   } catch (error) {
     console.error("Failed to load templates from storage:", error);
     templatesState.templates = generateDefaultTemplates();
-    if (templatesState.templates.length > 0) {
-      templatesState.activeTemplateId = templatesState.templates[0].id;
-      templatesState.activeCategoryId = templatesState.templates[0].categories.length > 0 ? templatesState.templates[0].categories[0].id : null;
-    }
+    syncTemplateSelection();
   }
 }
 
@@ -3351,6 +3376,14 @@ function loadSingleTaskFromHistory(body, filePrefix) {
     };
   } else {
     state.scale = createDefaultScaleState();
+  }
+
+  applyTemplatesState(body.templates, body.activeTemplateId, body.activeCategoryId, { preserveCurrentOnMissing: true });
+  renderTemplateList();
+  renderCategoryList();
+  updateToolButtons();
+  if (Array.isArray(body.templates) && body.templates.length > 0) {
+    saveTemplatesToStorage();
   }
 
   resetDraftState();
