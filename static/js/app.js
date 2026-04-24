@@ -159,6 +159,49 @@ function createTaskFromFile(file) {
     saved: false,
     savedPrefix: null,
     savedAt: null,
+    fromHistory: false,
+    historyData: null,
+  };
+}
+
+function createTaskFromHistory(historyTaskData, fullSessionData = null) {
+  const imageMeta = historyTaskData.imageMeta || {};
+  const scaleData = historyTaskData.scale || null;
+  
+  let taskScale = createDefaultScaleState();
+  if (scaleData && scaleData.enabled) {
+    taskScale = {
+      enabled: Boolean(scaleData.enabled),
+      pixels: Number(scaleData.pixels) || 0,
+      realLength: Number(scaleData.realLength) || 0,
+      unit: normalizeScaleUnit(scaleData.unit),
+      pixelPerUnit: Number(scaleData.pixelPerUnit) || 0,
+    };
+  }
+
+  const annotations = fullSessionData && fullSessionData.annotations
+    ? normalizeLoadedAnnotations(fullSessionData.annotations)
+    : [];
+
+  return {
+    taskId: crypto.randomUUID(),
+    fileName: imageMeta.name || historyTaskData.imageName || "历史图片",
+    imageFile: null,
+    imageDataUrl: null,
+    imageMeta: imageMeta,
+    loaded: false,
+    annotations: annotations,
+    selectedId: null,
+    undoStack: [],
+    imageOffset: { x: 0, y: 0 },
+    displayMode: "fit",
+    scale: taskScale,
+    saved: true,
+    savedPrefix: historyTaskData.filePrefix || null,
+    savedAt: historyTaskData.savedAt || null,
+    fromHistory: true,
+    historyData: historyTaskData,
+    fullSessionData: fullSessionData,
   };
 }
 
@@ -2334,69 +2377,226 @@ async function loadSession(filePrefix) {
       throw new Error(body.error || "加载历史项目失败。");
     }
 
-    elements.projectName.value = body.projectName || "GeoDraft Prototype";
-    elements.projectNotes.value = body.projectNotes || "";
-    elements.exportFilename.value = body.exportFilename || "";
-    elements.imageTags.value = Array.isArray(body.imageTags) ? body.imageTags.join(", ") : "";
-    state.imageOffset = { x: 0, y: 0 };
-    state.displayMode = "fit";
-    state.currentSessionPrefix = filePrefix;
-    state.originalImageDataUrl = body.originalImage || null;
-    state.annotations = normalizeLoadedAnnotations(body.annotations);
-    state.selectedId = null;
-    state.undoStack = [];
+    const isBatchSession = Boolean(body.isBatchSession);
+    const batchId = body.batchId;
 
-    if (body.scale && body.scale.enabled) {
-      state.scale = {
-        enabled: Boolean(body.scale.enabled),
-        pixels: Number(body.scale.pixels) || 0,
-        realLength: Number(body.scale.realLength) || 0,
-        unit: normalizeScaleUnit(body.scale.unit),
-        pixelPerUnit: Number(body.scale.pixelPerUnit) || 0,
-      };
-    } else {
-      state.scale = createDefaultScaleState();
+    if (isBatchSession && batchId) {
+      const batchResponse = await fetch(`/api/batches/${encodeURIComponent(batchId)}`);
+      const batchData = await batchResponse.json();
+
+      if (batchResponse.ok && batchData.tasks && batchData.tasks.length > 1) {
+        const choice = window.confirm(
+          `检测到这是一个批量任务的一部分，共 ${batchData.tasks.length} 张图片已保存。\n\n` +
+          `点击"确定"恢复整个批次（重建任务队列）\n` +
+          `点击"取消"仅恢复当前这张图片（单图模式）`
+        );
+
+        if (choice) {
+          await loadBatchSessionFromHistory(batchData, body);
+          return;
+        }
+      }
     }
+
+    loadSingleTaskFromHistory(body, filePrefix);
+  } catch (error) {
+    setStatus(error.message || "加载历史项目失败。", "error");
+  }
+}
+
+function loadSingleTaskFromHistory(body, filePrefix) {
+  if (session.isBatchSession) {
+    if (!window.confirm("当前处于批量模式，加载单图历史项目将退出批量模式。是否继续？")) {
+      return;
+    }
+    exitBatchSession();
+  }
+
+  elements.projectName.value = body.projectName || "GeoDraft Prototype";
+  elements.projectNotes.value = body.projectNotes || "";
+  elements.exportFilename.value = body.exportFilename || "";
+  elements.imageTags.value = Array.isArray(body.imageTags) ? body.imageTags.join(", ") : "";
+  state.imageOffset = { x: 0, y: 0 };
+  state.displayMode = "fit";
+  state.currentSessionPrefix = filePrefix;
+  state.originalImageDataUrl = body.originalImage || null;
+  state.annotations = normalizeLoadedAnnotations(body.annotations);
+  state.selectedId = null;
+  state.undoStack = [];
+
+  if (body.scale && body.scale.enabled) {
+    state.scale = {
+      enabled: Boolean(body.scale.enabled),
+      pixels: Number(body.scale.pixels) || 0,
+      realLength: Number(body.scale.realLength) || 0,
+      unit: normalizeScaleUnit(body.scale.unit),
+      pixelPerUnit: Number(body.scale.pixelPerUnit) || 0,
+    };
+  } else {
+    state.scale = createDefaultScaleState();
+  }
+
+  resetDraftState();
+  resetScaleState();
+  renderAnnotationList();
+  updateAnnotationNameEditor();
+  updateDisplayModeButtons();
+  updateScalePanel();
+
+  const imageMeta = body.imageMeta || {};
+  const preferredImage = state.originalImageDataUrl || body.annotatedImage;
+
+  if (preferredImage) {
+    loadImageFromSource(preferredImage, imageMeta.name || "已恢复图片", {
+      preserveAnnotations: true,
+      imageFile: null,
+      afterLoad: () => {
+        let message = body.originalImage
+          ? `已加载历史项目：${elements.projectName.value}`
+          : `已加载历史项目：${elements.projectName.value}。当前显示的是已标注预览图。`;
+        if (state.scale.enabled) {
+          message += ` 比例标定已恢复：${Math.round(state.scale.pixels)} px = ${formatRealLength(state.scale.realLength, state.scale.unit)}`;
+        }
+        setStatus(message);
+      },
+    });
+    return;
+  }
+
+  state.image = null;
+  state.imageName = imageMeta.name || "";
+  state.imageFile = null;
+  state.imagePlacement = null;
+  elements.fileName.textContent = imageMeta.name || "未恢复原图";
+  elements.imageSize.textContent =
+    imageMeta.width && imageMeta.height ? `${imageMeta.width} × ${imageMeta.height}` : "无文件";
+  refreshOverlay();
+  drawScene();
+  setStatus("标注数据已恢复，但没有找到图片文件，请重新选择原图。", "error");
+}
+
+async function loadBatchSessionFromHistory(batchData, currentTaskData) {
+  if (hasAnyUnsavedChanges()) {
+    if (!window.confirm("当前有未保存的更改，恢复批次历史项目将丢失这些更改。是否继续？")) {
+      return;
+    }
+  }
+
+  const batchInfo = batchData.batchInfo || {};
+  const tasks = batchData.tasks || [];
+
+  if (tasks.length === 0) {
+    setStatus("批次中没有找到任务数据。", "error");
+    return;
+  }
+
+  session.isBatchSession = true;
+  session.batchId = batchData.batchId;
+  session.batchName = currentTaskData.batchName || `历史批次 ${batchData.batchId.slice(0, 8)}`;
+  session.shareScale = Boolean(batchInfo.shareScale || currentTaskData.shareScale);
+  
+  if (currentTaskData.sharedScale && currentTaskData.sharedScale.enabled) {
+    session.sharedScale = {
+      enabled: Boolean(currentTaskData.sharedScale.enabled),
+      pixels: Number(currentTaskData.sharedScale.pixels) || 0,
+      realLength: Number(currentTaskData.sharedScale.realLength) || 0,
+      unit: normalizeScaleUnit(currentTaskData.sharedScale.unit),
+      pixelPerUnit: Number(currentTaskData.sharedScale.pixelPerUnit) || 0,
+    };
+  } else {
+    session.sharedScale = null;
+  }
+
+  session.tasks = [];
+  let currentTaskIndex = 0;
+
+  for (let i = 0; i < tasks.length; i++) {
+    const taskInfo = tasks[i];
+    let fullTaskData = null;
+
+    if (taskInfo.filePrefix === currentTaskData.currentSessionPrefix || 
+        (currentTaskData.savedAtUtc && taskInfo.savedAt === currentTaskData.savedAtUtc)) {
+      fullTaskData = currentTaskData;
+      currentTaskIndex = i;
+    } else {
+      try {
+        const taskResponse = await fetch(`/api/sessions/${encodeURIComponent(taskInfo.filePrefix)}`);
+        if (taskResponse.ok) {
+          fullTaskData = await taskResponse.json();
+        }
+      } catch (e) {
+        console.warn(`Failed to load task ${taskInfo.filePrefix}:`, e);
+      }
+    }
+
+    const task = createTaskFromHistory(taskInfo, fullTaskData);
+    
+    if (fullTaskData) {
+      task.annotations = normalizeLoadedAnnotations(fullTaskData.annotations);
+      
+      if (fullTaskData.scale && fullTaskData.scale.enabled) {
+        task.scale = {
+          enabled: Boolean(fullTaskData.scale.enabled),
+          pixels: Number(fullTaskData.scale.pixels) || 0,
+          realLength: Number(fullTaskData.scale.realLength) || 0,
+          unit: normalizeScaleUnit(fullTaskData.scale.unit),
+          pixelPerUnit: Number(fullTaskData.scale.pixelPerUnit) || 0,
+        };
+      }
+    }
+
+    session.tasks.push(task);
+  }
+
+  elements.projectName.value = currentTaskData.projectName || "GeoDraft Prototype";
+  elements.projectNotes.value = currentTaskData.projectNotes || "";
+  elements.exportFilename.value = currentTaskData.exportFilename || "";
+
+  session.currentTaskIndex = currentTaskIndex;
+
+  updateBatchUI();
+  
+  const targetTask = session.tasks[currentTaskIndex];
+  if (targetTask) {
+    syncStateFromTask(targetTask);
 
     resetDraftState();
     resetScaleState();
-    renderAnnotationList();
-    updateAnnotationNameEditor();
-    updateDisplayModeButtons();
-    updateScalePanel();
 
-    const imageMeta = body.imageMeta || {};
-    const preferredImage = state.originalImageDataUrl || body.annotatedImage;
-
+    const preferredImage = currentTaskData.originalImage || currentTaskData.annotatedImage;
     if (preferredImage) {
+      const imageMeta = currentTaskData.imageMeta || {};
       loadImageFromSource(preferredImage, imageMeta.name || "已恢复图片", {
         preserveAnnotations: true,
         imageFile: null,
         afterLoad: () => {
-          let message = body.originalImage
-            ? `已加载历史项目：${elements.projectName.value}`
-            : `已加载历史项目：${elements.projectName.value}。当前显示的是已标注预览图。`;
-          if (state.scale.enabled) {
-            message += ` 比例标定已恢复：${Math.round(state.scale.pixels)} px = ${formatRealLength(state.scale.realLength, state.scale.unit)}`;
+          renderAnnotationList();
+          updateAnnotationNameEditor();
+          updateDisplayModeButtons();
+          updateImagePositionDisplay();
+          updateToolButtons();
+          updateScalePanel();
+          refreshOverlay();
+          computeImagePlacement();
+          drawScene();
+          updateBatchUI();
+          renderBatchTaskList();
+          
+          let message = `已恢复批次：共 ${session.tasks.length} 张图片，当前在第 ${currentTaskIndex + 1} 张`;
+          if (session.shareScale && session.sharedScale && session.sharedScale.enabled) {
+            message += `，比例标定已复用`;
           }
           setStatus(message);
         },
       });
-      return;
+    } else {
+      renderAnnotationList();
+      updateAnnotationNameEditor();
+      updateDisplayModeButtons();
+      updateScalePanel();
+      renderBatchTaskList();
+      setStatus(`已恢复批次：共 ${session.tasks.length} 张图片。部分图片可能需要重新选择原图。`);
     }
-
-    state.image = null;
-    state.imageName = imageMeta.name || "";
-    state.imageFile = null;
-    state.imagePlacement = null;
-    elements.fileName.textContent = imageMeta.name || "未恢复原图";
-    elements.imageSize.textContent =
-      imageMeta.width && imageMeta.height ? `${imageMeta.width} × ${imageMeta.height}` : "无文件";
-    refreshOverlay();
-    drawScene();
-    setStatus("标注数据已恢复，但没有找到图片文件，请重新选择原图。", "error");
-  } catch (error) {
-    setStatus(error.message || "加载历史项目失败。", "error");
   }
 }
 
@@ -3193,11 +3393,38 @@ if (elements.batchTaskList) {
 
 if (elements.shareScale) {
   elements.shareScale.addEventListener("change", () => {
+    const wasSharing = session.shareScale;
     session.shareScale = elements.shareScale.checked;
-    if (session.shareScale && state.scale.enabled) {
-      session.sharedScale = structuredClone(state.scale);
+    
+    if (session.shareScale) {
+      if (state.scale.enabled) {
+        session.sharedScale = structuredClone(state.scale);
+        setStatus(`已启用比例复用，当前比例 ${Math.round(state.scale.pixels)} px = ${formatRealLength(state.scale.realLength, state.scale.unit)} 将应用到所有图片`);
+      } else {
+        session.sharedScale = null;
+        setStatus("已启用比例复用，请先设置比例标定");
+      }
+    } else {
+      const currentTask = getCurrentTask();
+      if (currentTask) {
+        state.scale = structuredClone(currentTask.scale);
+        updateScalePanel();
+        setStatus("已关闭比例复用，各图片将使用独立的比例设置");
+      }
+      session.sharedScale = null;
     }
+    
     updateBatchUI();
+  });
+}
+
+if (elements.applyProjectToAll) {
+  elements.applyProjectToAll.addEventListener("change", () => {
+    if (elements.applyProjectToAll.checked) {
+      setStatus("已启用项目设置复用，保存时将使用当前项目名称和备注");
+    } else {
+      setStatus("已关闭项目设置复用，各图片可使用独立的项目名称和备注");
+    }
   });
 }
 

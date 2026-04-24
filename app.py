@@ -233,6 +233,61 @@ def get_session(file_prefix: str):
     return jsonify(content), 200
 
 
+@app.get("/api/batches/<batch_id>")
+def get_batch(batch_id: str):
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+    batch_tasks: list[dict[str, object]] = []
+
+    for json_path in DATA_DIR.glob("*.json"):
+        try:
+            content = json.loads(json_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, IOError):
+            continue
+
+        if content.get("batchId") != batch_id:
+            continue
+
+        file_prefix = _safe_prefix(json_path.stem)
+        image_meta = content.get("imageMeta") or {}
+
+        batch_tasks.append({
+            "filePrefix": file_prefix,
+            "projectName": content.get("projectName", "Untitled"),
+            "notes": content.get("projectNotes", ""),
+            "savedAt": _parse_timestamp(json_path.name) or content.get("savedAtUtc", ""),
+            "annotationCount": len(content.get("annotations", [])),
+            "imageName": image_meta.get("name", ""),
+            "imageTags": content.get("imageTags", []),
+            "exportFilename": content.get("exportFilename", ""),
+            "hasOriginalImage": _find_saved_image(file_prefix, "-original") is not None,
+            "hasAnnotatedImage": _find_saved_image(file_prefix, "-annotated") is not None,
+            "taskIndex": content.get("taskIndex", 0),
+            "totalTasks": content.get("totalTasks", 1),
+            "shareScale": content.get("shareScale", False),
+            "scale": content.get("scale"),
+            "sharedScale": content.get("sharedScale"),
+        })
+
+    batch_tasks.sort(key=lambda task: task.get("taskIndex", 0))
+
+    batch_info = None
+    if batch_tasks:
+        first_task = batch_tasks[0]
+        batch_info = {
+            "batchId": batch_id,
+            "totalTasks": len(batch_tasks),
+            "savedTasks": len(batch_tasks),
+            "shareScale": first_task.get("shareScale", False),
+        }
+
+    return jsonify({
+        "batchId": batch_id,
+        "batchInfo": batch_info,
+        "tasks": batch_tasks,
+    }), 200
+
+
 @app.delete("/api/sessions/<file_prefix>")
 def delete_session(file_prefix: str):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
