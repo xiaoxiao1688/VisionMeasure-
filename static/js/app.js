@@ -745,8 +745,8 @@ function getPolygonCentroid(points) {
 }
 
 function normalizeScaleUnit(unit) {
-  const normalized = String(unit ?? "").trim();
-  return normalized || "cm";
+  const normalized = String(unit ?? "").replace(/\s+/g, " ").trim();
+  return (normalized || "cm").slice(0, 24);
 }
 
 function isPresetScaleUnit(unit) {
@@ -1039,7 +1039,7 @@ function showScaleModal(pixelLength) {
 
   state.pendingScalePixels = pixelLength;
   elements.scaleLengthInput.value = "";
-  syncScaleUnitInputs(state.scale.enabled ? state.scale.unit : "cm");
+  syncScaleUnitInputs(state.scale.unit);
   elements.scalePreviewLength.textContent = `${Math.round(pixelLength)} px`;
   elements.scaleModalOverlay.classList.remove("hidden");
   elements.scaleLengthInput.focus();
@@ -1273,6 +1273,74 @@ function updateAnnotationMetrics(annotation) {
     annotation.area = getPolygonArea(annotation.points);
     annotation.perimeter = getPolygonPerimeter(annotation.points);
   }
+}
+
+function normalizeLoadedPoint(point) {
+  if (!point || typeof point !== "object") {
+    return null;
+  }
+
+  const x = Number(point.x);
+  const y = Number(point.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    return null;
+  }
+
+  return { x, y };
+}
+
+function normalizeLoadedAnnotation(annotation) {
+  if (!annotation || typeof annotation !== "object") {
+    return null;
+  }
+
+  const normalized = {
+    id: annotation.id || crypto.randomUUID(),
+    type: String(annotation.type || "rectangle"),
+    name: typeof annotation.name === "string" ? annotation.name : "",
+  };
+
+  if (normalized.type === "rectangle") {
+    const x = Number(annotation.x);
+    const y = Number(annotation.y);
+    const width = Number(annotation.width);
+    const height = Number(annotation.height);
+    if (![x, y, width, height].every(Number.isFinite) || width <= 0 || height <= 0) {
+      return null;
+    }
+
+    normalized.x = x;
+    normalized.y = y;
+    normalized.width = width;
+    normalized.height = height;
+    updateAnnotationMetrics(normalized);
+    return normalized;
+  }
+
+  if (normalized.type === "line" || normalized.type === "polygon" || normalized.type === "brush") {
+    const points = Array.isArray(annotation.points)
+      ? annotation.points.map(normalizeLoadedPoint).filter(Boolean)
+      : [];
+
+    const minPoints = normalized.type === "polygon" ? 3 : 2;
+    if (points.length < minPoints) {
+      return null;
+    }
+
+    normalized.points = points;
+    updateAnnotationMetrics(normalized);
+    return normalized;
+  }
+
+  return null;
+}
+
+function normalizeLoadedAnnotations(annotations) {
+  if (!Array.isArray(annotations)) {
+    return [];
+  }
+
+  return annotations.map(normalizeLoadedAnnotation).filter(Boolean);
 }
 
 function startEditing(annotation, editMode, handleIndex = null) {
@@ -1844,7 +1912,7 @@ async function loadSession(filePrefix) {
     state.displayMode = "fit";
     state.currentSessionPrefix = filePrefix;
     state.originalImageDataUrl = body.originalImage || null;
-    state.annotations = Array.isArray(body.annotations) ? body.annotations : [];
+    state.annotations = normalizeLoadedAnnotations(body.annotations);
     state.selectedId = null;
     state.undoStack = [];
 

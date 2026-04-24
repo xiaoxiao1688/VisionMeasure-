@@ -88,6 +88,13 @@ def _to_float(value: object) -> float | None:
         return None
 
 
+def _normalize_unit_label(value: object, default: str = "cm") -> str:
+    unit = re.sub(r"\s+", " ", str(value or "")).strip()
+    if not unit:
+        return default
+    return unit[:24]
+
+
 def _normalize_scale(scale_payload: object) -> dict[str, object] | None:
     if not isinstance(scale_payload, dict) or not bool(scale_payload.get("enabled")):
         return None
@@ -95,7 +102,7 @@ def _normalize_scale(scale_payload: object) -> dict[str, object] | None:
     pixels = _to_float(scale_payload.get("pixels"))
     real_length = _to_float(scale_payload.get("realLength"))
     pixel_per_unit = _to_float(scale_payload.get("pixelPerUnit"))
-    unit = str(scale_payload.get("unit") or "").strip() or "cm"
+    unit = _normalize_unit_label(scale_payload.get("unit"))
 
     if (
         pixels is None
@@ -112,7 +119,7 @@ def _normalize_scale(scale_payload: object) -> dict[str, object] | None:
         "pixels": round(pixels, 2),
         "realLength": round(real_length, 4),
         "unit": unit,
-        "pixelPerUnit": round(pixel_per_unit, 6),
+        "pixelPerUnit": round(pixel_per_unit, 8),
     }
 
 
