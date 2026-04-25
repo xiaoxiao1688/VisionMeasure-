@@ -44,6 +44,11 @@ ensureImagePositionPanelMarkup();
 
 const elements = {
   annotationCount: document.querySelector("#annotation-count"),
+  annotationFilterCategory: document.querySelector("#annotation-filter-category"),
+  annotationFilterClear: document.querySelector("#annotation-filter-clear"),
+  annotationFilterQuery: document.querySelector("#annotation-filter-query"),
+  annotationFilterType: document.querySelector("#annotation-filter-type"),
+  annotationHint: document.querySelector("#annotation-hint"),
   annotationList: document.querySelector("#annotation-list"),
   annotationNameEditor: document.querySelector("#annotation-name-editor"),
   annotationNameInput: document.querySelector("#annotation-name-input"),
@@ -154,6 +159,11 @@ const state = {
   scaleLinePoints: [],
   scaleDraft: null,
   pendingScalePixels: 0,
+  annotationFilters: {
+    query: "",
+    shapeType: "all",
+    categoryId: "all",
+  },
 };
 
 const presetColors = [
@@ -386,6 +396,7 @@ function setActiveTemplate(templateId) {
   renderTemplateList();
   renderCategoryList();
   updateToolButtons();
+  refreshAnnotationFilterResults();
   return true;
 }
 
@@ -401,6 +412,7 @@ function setActiveCategory(categoryId) {
   syncTemplateSelection(template.id, categoryId);
   renderCategoryList();
   updateToolButtons();
+  refreshAnnotationFilterResults();
   setStatus(`已选择类别：${category.name}，工具：${category.shapeType === "rectangle" ? "矩形" : category.shapeType === "polygon" ? "多边形" : category.shapeType === "line" ? "折线" : "画笔"}`);
   return true;
 }
@@ -412,6 +424,7 @@ function addTemplate(template) {
   renderTemplateList();
   renderCategoryList();
   updateToolButtons();
+  refreshAnnotationFilterResults();
   saveTemplatesToCurrentTask();
 }
 
@@ -435,6 +448,7 @@ function updateTemplate(templateId, updates) {
   renderTemplateList();
   renderCategoryList();
   updateToolButtons();
+  refreshAnnotationFilterResults();
   saveTemplatesToCurrentTask();
   return true;
 }
@@ -454,6 +468,7 @@ function deleteTemplate(templateId) {
   renderTemplateList();
   renderCategoryList();
   updateToolButtons();
+  refreshAnnotationFilterResults();
   saveTemplatesToCurrentTask();
   setStatus("已删除模板。");
   return true;
@@ -472,6 +487,7 @@ function addCategory(templateId, category) {
   }
   renderCategoryList();
   updateToolButtons();
+  refreshAnnotationFilterResults();
   saveTemplatesToCurrentTask();
   return true;
 }
@@ -491,6 +507,7 @@ function updateCategory(templateId, categoryId, updates) {
   }
   renderCategoryList();
   updateToolButtons();
+  refreshAnnotationFilterResults();
   saveTemplatesToCurrentTask();
   return true;
 }
@@ -512,6 +529,7 @@ function deleteCategory(templateId, categoryId) {
   }
   renderCategoryList();
   updateToolButtons();
+  refreshAnnotationFilterResults();
   saveTemplatesToCurrentTask();
   setStatus("已删除类别。");
   return true;
@@ -1492,7 +1510,7 @@ function drawScene() {
   ctx.drawImage(state.image, placement.x, placement.y, placement.width, placement.height);
   ctx.restore();
 
-  state.annotations.forEach((annotation) => drawAnnotation(annotation));
+  getFilteredAnnotations().forEach((annotation) => drawAnnotation(annotation));
 
   if (state.draftAnnotation) {
     drawDraftAnnotation();
@@ -2461,8 +2479,9 @@ function isPointNearVertex(point, vertex, threshold = 8) {
 }
 
 function findHitAnnotation(point) {
-  for (let index = state.annotations.length - 1; index >= 0; index -= 1) {
-    const annotation = state.annotations[index];
+  const annotations = getFilteredAnnotations();
+  for (let index = annotations.length - 1; index >= 0; index -= 1) {
+    const annotation = annotations[index];
     
     if (annotation.type === "rectangle") {
       if (isPointInRectangle(point, annotation)) {
@@ -2703,6 +2722,7 @@ function renderTemplateList() {
 
   if (!templates.length) {
     elements.templateSelect.innerHTML = '<option value="">暂无模板</option>';
+    renderAnnotationFilterCategoryOptions();
     return;
   }
 
@@ -2713,6 +2733,7 @@ function renderTemplateList() {
       return `<option value="${template.id}" ${selected}>${escapeHtml(template.name)}${defaultLabel}</option>`;
     })
     .join("");
+  renderAnnotationFilterCategoryOptions();
 }
 
 function renderCategoryList() {
@@ -2721,6 +2742,7 @@ function renderCategoryList() {
 
   if (!categories.length) {
     elements.categoryList.innerHTML = '<li class="empty-state">暂无类别</li>';
+    renderAnnotationFilterCategoryOptions();
     return;
   }
 
@@ -2752,6 +2774,7 @@ function renderCategoryList() {
       `;
     })
     .join("");
+  renderAnnotationFilterCategoryOptions();
 }
 
 function getShapeTypeLabel(shapeType) {
@@ -2764,8 +2787,105 @@ function getShapeTypeLabel(shapeType) {
   return labels[shapeType] || "未知";
 }
 
+function getAnnotationFilterText(annotation) {
+  const category = getAnnotationCategory(annotation);
+  return [
+    annotation.name || "",
+    category?.name || "",
+    getShapeTypeLabel(annotation.type),
+  ]
+    .join(" ")
+    .toLowerCase();
+}
+
+function matchesAnnotationFilters(annotation) {
+  const query = state.annotationFilters.query.trim().toLowerCase();
+  if (query && !getAnnotationFilterText(annotation).includes(query)) {
+    return false;
+  }
+
+  if (state.annotationFilters.shapeType !== "all" && annotation.type !== state.annotationFilters.shapeType) {
+    return false;
+  }
+
+  if (state.annotationFilters.categoryId !== "all" && annotation.categoryId !== state.annotationFilters.categoryId) {
+    return false;
+  }
+
+  return true;
+}
+
+function getFilteredAnnotations() {
+  return state.annotations.filter(matchesAnnotationFilters);
+}
+
+function syncSelectedAnnotationWithFilters() {
+  if (!state.selectedId) {
+    return;
+  }
+
+  const selected = state.annotations.find((annotation) => annotation.id === state.selectedId);
+  if (selected && matchesAnnotationFilters(selected)) {
+    return;
+  }
+
+  state.selectedId = null;
+  resetEditState();
+}
+
+function refreshAnnotationFilterResults(options = {}) {
+  const { redraw = true } = options;
+  syncSelectedAnnotationWithFilters();
+  renderAnnotationList();
+  updateAnnotationNameEditor();
+  if (redraw) {
+    drawScene();
+  }
+}
+
+function renderAnnotationFilterCategoryOptions() {
+  if (!elements.annotationFilterCategory) {
+    return;
+  }
+
+  const categories = getActiveCategories();
+  const currentValue = state.annotationFilters.categoryId;
+  elements.annotationFilterCategory.innerHTML = [
+    '<option value="all">当前模板全部类别</option>',
+    ...categories.map((category) => `<option value="${category.id}">${escapeHtml(category.name)}</option>`),
+  ].join("");
+
+  const hasMatch = currentValue === "all" || categories.some((category) => category.id === currentValue);
+  state.annotationFilters.categoryId = hasMatch ? currentValue : "all";
+  elements.annotationFilterCategory.value = state.annotationFilters.categoryId;
+}
+
+function updateAnnotationHint(totalCount, filteredCount) {
+  if (!elements.annotationHint) {
+    return;
+  }
+
+  if (totalCount === 0) {
+    elements.annotationHint.textContent = "最新创建的排前面";
+    return;
+  }
+
+  if (filteredCount === totalCount) {
+    elements.annotationHint.textContent = "最新创建的排前面";
+    return;
+  }
+
+  elements.annotationHint.textContent = `当前显示 ${filteredCount} / ${totalCount}`;
+}
+
 function renderAnnotationList() {
-  elements.annotationCount.textContent = String(state.annotations.length);
+  syncSelectedAnnotationWithFilters();
+  const filteredAnnotations = getFilteredAnnotations();
+  elements.annotationCount.textContent =
+    filteredAnnotations.length === state.annotations.length
+      ? String(state.annotations.length)
+      : `${filteredAnnotations.length}/${state.annotations.length}`;
+  updateAnnotationHint(state.annotations.length, filteredAnnotations.length);
 
   if (!state.annotations.length) {
     elements.annotationList.innerHTML = '<li class="empty-state">暂无标注。</li>';
@@ -2773,7 +2893,13 @@ function renderAnnotationList() {
     return;
   }
 
-  elements.annotationList.innerHTML = [...state.annotations]
+  if (!filteredAnnotations.length) {
+    elements.annotationList.innerHTML = '<li class="empty-state">当前筛选条件下暂无标注。</li>';
+    elements.selectionSize.textContent = "无";
+    return;
+  }
+
+  elements.annotationList.innerHTML = [...filteredAnnotations]
     .reverse()
     .map((annotation) => {
       const activeClass = annotation.id === state.selectedId ? "annotation-item active" : "annotation-item";
@@ -2814,6 +2940,21 @@ function updateAnnotationNameEditor() {
 
   elements.annotationNameEditor.classList.remove("hidden");
   elements.annotationNameInput.value = annotation.name || "";
+}
+
+function clearAnnotationFilters() {
+  state.annotationFilters.query = "";
+  state.annotationFilters.shapeType = "all";
+  state.annotationFilters.categoryId = "all";
+
+  if (elements.annotationFilterQuery) {
+    elements.annotationFilterQuery.value = "";
+  }
+  if (elements.annotationFilterType) {
+    elements.annotationFilterType.value = "all";
+  }
+  renderAnnotationFilterCategoryOptions();
+  refreshAnnotationFilterResults();
 }
 
 function saveAnnotationName() {
@@ -2868,9 +3009,8 @@ function loadImageFromSource(source, fileName, options = {}) {
     elements.fileName.textContent = state.imageName;
     elements.imageSize.textContent = `${image.width} × ${image.height}`;
     refreshOverlay();
-    computeImagePlacement();
+    syncCanvasSize();
     renderAnnotationList();
-    drawScene();
 
     if (typeof afterLoad === "function") {
       afterLoad();
@@ -2957,7 +3097,7 @@ function drawToCanvas(targetContext) {
   const canvasWidth = state.image.width;
   const canvasHeight = state.image.height;
 
-  state.annotations.forEach((annotation) => {
+  getFilteredAnnotations().forEach((annotation) => {
     if (!shouldIncludeInExport(annotation)) {
       return;
     }
@@ -4150,6 +4290,33 @@ elements.annotationList.addEventListener("click", (event) => {
 
   selectAnnotation(item.dataset.id);
 });
+
+if (elements.annotationFilterQuery) {
+  elements.annotationFilterQuery.addEventListener("input", (event) => {
+    state.annotationFilters.query = event.target.value || "";
+    refreshAnnotationFilterResults();
+  });
+}
+
+if (elements.annotationFilterType) {
+  elements.annotationFilterType.addEventListener("change", (event) => {
+    state.annotationFilters.shapeType = event.target.value || "all";
+    refreshAnnotationFilterResults();
+  });
+}
+
+if (elements.annotationFilterCategory) {
+  elements.annotationFilterCategory.addEventListener("change", (event) => {
+    state.annotationFilters.categoryId = event.target.value || "all";
+    refreshAnnotationFilterResults();
+  });
+}
+
+if (elements.annotationFilterClear) {
+  elements.annotationFilterClear.addEventListener("click", () => {
+    clearAnnotationFilters();
+  });
+}
 
 elements.historyList.addEventListener("click", (event) => {
   const deleteButton = event.target.closest("[data-delete-prefix]");

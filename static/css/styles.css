@@ -439,6 +439,23 @@ textarea {
   color: var(--muted);
 }
 
+.annotation-filter-panel {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.annotation-filter-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.ghost.compact {
+  padding: 8px 12px;
+  font-size: 0.82rem;
+}
+
 .annotation-list {
   list-style: none;
   margin: 0;

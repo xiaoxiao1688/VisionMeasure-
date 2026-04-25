@@ -307,6 +307,22 @@
             <h2>标注列表</h2>
             <span id="annotation-hint">最新创建的排前面</span>
           </div>
+          <div id="annotation-filter-panel" class="annotation-filter-panel">
+            <input id="annotation-filter-query" type="text" placeholder="搜索名称、类别或类型" />
+            <div class="annotation-filter-row">
+              <select id="annotation-filter-type">
+                <option value="all">全部类型</option>
+                <option value="rectangle">矩形</option>
+                <option value="line">折线</option>
+                <option value="polygon">多边形</option>
+                <option value="brush">画笔</option>
+              </select>
+              <select id="annotation-filter-category">
+                <option value="all">当前模板全部类别</option>
+              </select>
+            </div>
+            <button id="annotation-filter-clear" class="ghost compact" type="button">清空筛选</button>
+          </div>
           <ul id="annotation-list" class="annotation-list">
             <li class="empty-state">暂无标注。</li>
           </ul>
