@@ -389,6 +389,81 @@ textarea {
   transform: translateY(-1px);
 }
 
+.training-export-panel {
+  margin-top: 16px;
+  padding: 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(25, 50, 60, 0.12);
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.training-export-panel .panel-heading {
+  margin-bottom: 8px;
+}
+
+.training-export-panel .panel-heading h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.training-export-meta {
+  margin: 0 0 12px;
+  font-size: 0.82rem;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.training-class-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.training-class-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(25, 50, 60, 0.08);
+}
+
+.training-class-name {
+  margin: 0;
+  font-weight: 700;
+}
+
+.training-class-meta {
+  margin: 2px 0 0;
+  font-size: 0.76rem;
+  color: var(--text-muted);
+}
+
+.training-class-count {
+  flex-shrink: 0;
+  font-weight: 700;
+  color: var(--accent-strong);
+}
+
+.training-export-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.training-export-actions button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
+
 .status-line {
   margin: 16px 0 0;
   padding: 12px 14px;
@@ -1309,6 +1384,10 @@ textarea {
 
 @media (max-width: 640px) {
   .actions {
+    grid-template-columns: 1fr;
+  }
+
+  .training-export-actions {
     grid-template-columns: 1fr;
   }
 

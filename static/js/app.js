@@ -57,7 +57,9 @@ const elements = {
   deleteSelectedButton: document.querySelector("#delete-selected-button"),
   displayModeButtons: [...document.querySelectorAll("[data-display-mode]")],
   downloadButton: document.querySelector("#download-button"),
+  exportTrainingJsonButton: document.querySelector("#export-training-json-button"),
   exportFilename: document.querySelector("#export-filename"),
+  exportYoloButton: document.querySelector("#export-yolo-button"),
   fileName: document.querySelector("#file-name"),
   historyList: document.querySelector("#history-list"),
   imageLoader: document.querySelector("#image-loader"),
@@ -84,6 +86,9 @@ const elements = {
   scaleRatio: document.querySelector("#scale-ratio"),
   scaleHint: document.querySelector("#scale-hint"),
   clearScale: document.querySelector("#clear-scale"),
+  trainingClassList: document.querySelector("#training-class-list"),
+  trainingExportHint: document.querySelector("#training-export-hint"),
+  trainingExportMeta: document.querySelector("#training-export-meta"),
   scaleModalOverlay: document.querySelector("#scale-modal-overlay"),
   scaleLengthInput: document.querySelector("#scale-length"),
   scaleUnitSelect: document.querySelector("#scale-unit"),
@@ -2723,6 +2728,7 @@ function renderTemplateList() {
   if (!templates.length) {
     elements.templateSelect.innerHTML = '<option value="">暂无模板</option>';
     renderAnnotationFilterCategoryOptions();
+    renderTrainingExportPanel();
     return;
   }
 
@@ -2734,6 +2740,7 @@ function renderTemplateList() {
     })
     .join("");
   renderAnnotationFilterCategoryOptions();
+  renderTrainingExportPanel();
 }
 
 function renderCategoryList() {
@@ -2743,6 +2750,7 @@ function renderCategoryList() {
   if (!categories.length) {
     elements.categoryList.innerHTML = '<li class="empty-state">暂无类别</li>';
     renderAnnotationFilterCategoryOptions();
+    renderTrainingExportPanel();
     return;
   }
 
@@ -2775,6 +2783,7 @@ function renderCategoryList() {
     })
     .join("");
   renderAnnotationFilterCategoryOptions();
+  renderTrainingExportPanel();
 }
 
 function getShapeTypeLabel(shapeType) {
@@ -2785,6 +2794,261 @@ function getShapeTypeLabel(shapeType) {
     brush: "画笔",
   };
   return labels[shapeType] || "未知";
+}
+
+function roundTrainingValue(value, digits = 6) {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+  return Number(value.toFixed(digits));
+}
+
+function getCurrentImageMetaForTrainingExport() {
+  const currentTask = getCurrentTask();
+  const taskMeta = currentTask?.imageMeta || {};
+  const width = Number(state.image?.width || taskMeta.width || 0);
+  const height = Number(state.image?.height || taskMeta.height || 0);
+
+  return {
+    name: state.imageName || taskMeta.name || "unnamed-image",
+    width,
+    height,
+  };
+}
+
+function getTrainingExportBaseName() {
+  const base =
+    elements.exportFilename.value.trim() ||
+    state.imageName ||
+    elements.projectName.value.trim() ||
+    "geodraft-training";
+
+  const normalized = String(base)
+    .replace(/\.[^.]+$/, "")
+    .replace(/[<>:"/\\|?*\u0000-\u001F]+/g, "-")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+
+  return normalized || "geodraft-training";
+}
+
+function getTrainingExportAnnotations() {
+  return state.annotations.filter((annotation) => shouldIncludeInExport(annotation));
+}
+
+function getTrainingClassKey(annotation) {
+  return annotation.categoryId ? `category:${annotation.categoryId}` : `shape:${annotation.type}`;
+}
+
+function getTrainingClassName(annotation) {
+  const category = getAnnotationCategory(annotation);
+  return category?.name || getShapeTypeLabel(annotation.type);
+}
+
+function buildTrainingClassEntries(annotations = getTrainingExportAnnotations()) {
+  const entries = [];
+  const entryMap = new Map();
+
+  annotations.forEach((annotation) => {
+    const key = getTrainingClassKey(annotation);
+    if (!entryMap.has(key)) {
+      const entry = {
+        key,
+        classId: entries.length,
+        name: getTrainingClassName(annotation),
+        shapeType: annotation.type,
+        categoryId: annotation.categoryId || null,
+        count: 0,
+      };
+      entries.push(entry);
+      entryMap.set(key, entry);
+    }
+
+    entryMap.get(key).count += 1;
+  });
+
+  return entries;
+}
+
+function getAnnotationBoundingBox(annotation) {
+  if (annotation.type === "rectangle") {
+    return {
+      x: annotation.x,
+      y: annotation.y,
+      width: annotation.width,
+      height: annotation.height,
+    };
+  }
+
+  if (!annotation.points?.length) {
+    return null;
+  }
+
+  const xs = annotation.points.map((point) => point.x);
+  const ys = annotation.points.map((point) => point.y);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+
+  return {
+    x: minX,
+    y: minY,
+    width: maxX - minX,
+    height: maxY - minY,
+  };
+}
+
+function getAnnotationOutlinePoints(annotation) {
+  if (annotation.type === "rectangle") {
+    return [
+      { x: annotation.x, y: annotation.y },
+      { x: annotation.x + annotation.width, y: annotation.y },
+      { x: annotation.x + annotation.width, y: annotation.y + annotation.height },
+      { x: annotation.x, y: annotation.y + annotation.height },
+    ];
+  }
+
+  return Array.isArray(annotation.points) ? annotation.points : [];
+}
+
+function serializeTrainingAnnotation(annotation, classEntry, imageMeta) {
+  const bbox = getAnnotationBoundingBox(annotation);
+  const outlinePoints = getAnnotationOutlinePoints(annotation);
+
+  return {
+    id: annotation.id,
+    name: annotation.name || "",
+    classId: classEntry.classId,
+    className: classEntry.name,
+    categoryId: classEntry.categoryId,
+    shapeType: annotation.type,
+    color: getAnnotationCategoryColor(annotation),
+    bbox: bbox
+      ? {
+          x: roundTrainingValue(bbox.x, 2),
+          y: roundTrainingValue(bbox.y, 2),
+          width: roundTrainingValue(bbox.width, 2),
+          height: roundTrainingValue(bbox.height, 2),
+          normalized: {
+            xCenter: roundTrainingValue((bbox.x + bbox.width / 2) / imageMeta.width),
+            yCenter: roundTrainingValue((bbox.y + bbox.height / 2) / imageMeta.height),
+            width: roundTrainingValue(bbox.width / imageMeta.width),
+            height: roundTrainingValue(bbox.height / imageMeta.height),
+          },
+        }
+      : null,
+    points: outlinePoints.map((point) => ({
+      x: roundTrainingValue(point.x, 2),
+      y: roundTrainingValue(point.y, 2),
+      normalizedX: imageMeta.width ? roundTrainingValue(point.x / imageMeta.width) : 0,
+      normalizedY: imageMeta.height ? roundTrainingValue(point.y / imageMeta.height) : 0,
+    })),
+    metrics: {
+      width: Number.isFinite(annotation.width) ? roundTrainingValue(annotation.width, 2) : null,
+      height: Number.isFinite(annotation.height) ? roundTrainingValue(annotation.height, 2) : null,
+      length: Number.isFinite(annotation.length) ? roundTrainingValue(annotation.length, 2) : null,
+      area: Number.isFinite(annotation.area) ? roundTrainingValue(annotation.area, 2) : null,
+      perimeter: Number.isFinite(annotation.perimeter) ? roundTrainingValue(annotation.perimeter, 2) : null,
+    },
+  };
+}
+
+function buildTrainingExportPayload() {
+  const imageMeta = getCurrentImageMetaForTrainingExport();
+  if (!imageMeta.width || !imageMeta.height) {
+    return null;
+  }
+
+  const annotations = getTrainingExportAnnotations();
+  const classEntries = buildTrainingClassEntries(annotations);
+  const classMap = new Map(classEntries.map((entry) => [entry.key, entry]));
+
+  return {
+    version: "1.0",
+    exportedAt: new Date().toISOString(),
+    projectName: elements.projectName.value.trim() || "GeoDraft Prototype",
+    projectNotes: elements.projectNotes.value.trim(),
+    image: imageMeta,
+    imageTags: normalizeImageTags(elements.imageTags.value),
+    scale:
+      state.scale.enabled && state.scale.pixelPerUnit > 0
+        ? {
+            enabled: true,
+            pixels: roundTrainingValue(state.scale.pixels, 2),
+            realLength: roundTrainingValue(state.scale.realLength, 4),
+            unit: state.scale.unit,
+            pixelPerUnit: roundTrainingValue(state.scale.pixelPerUnit, 8),
+          }
+        : null,
+    classes: classEntries.map((entry) => ({
+      classId: entry.classId,
+      name: entry.name,
+      shapeType: entry.shapeType,
+      categoryId: entry.categoryId,
+      count: entry.count,
+    })),
+    annotations: annotations.map((annotation) =>
+      serializeTrainingAnnotation(annotation, classMap.get(getTrainingClassKey(annotation)), imageMeta)
+    ),
+  };
+}
+
+function downloadBlobFile(filename, content, mimeType) {
+  const blob = content instanceof Blob ? content : new Blob([content], { type: mimeType });
+  const blobUrl = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = blobUrl;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(blobUrl);
+}
+
+function renderTrainingExportPanel() {
+  if (!elements.trainingClassList || !elements.trainingExportHint || !elements.trainingExportMeta) {
+    return;
+  }
+
+  const imageMeta = getCurrentImageMetaForTrainingExport();
+  const annotations = getTrainingExportAnnotations();
+  const classEntries = buildTrainingClassEntries(annotations);
+
+  elements.trainingExportHint.textContent = `${classEntries.length} 类 / ${annotations.length} 条`;
+
+  if (!imageMeta.width || !imageMeta.height) {
+    elements.trainingExportMeta.textContent = "先加载图片，再导出训练标签。";
+  } else {
+    elements.trainingExportMeta.textContent = `当前图片 ${imageMeta.width} × ${imageMeta.height}，导出时会按现有类别映射生成 class id。`;
+  }
+
+  if (!classEntries.length) {
+    elements.trainingClassList.innerHTML = '<li class="empty-state">暂无可导出的训练类别。</li>';
+  } else {
+    elements.trainingClassList.innerHTML = classEntries
+      .map(
+        (entry) => `
+          <li class="training-class-item">
+            <div>
+              <p class="training-class-name">${escapeHtml(entry.name)}</p>
+              <p class="training-class-meta">class ${entry.classId} · ${escapeHtml(getShapeTypeLabel(entry.shapeType))}</p>
+            </div>
+            <span class="training-class-count">${entry.count}</span>
+          </li>
+        `
+      )
+      .join("");
+  }
+
+  const disableExports = !imageMeta.width || !imageMeta.height || annotations.length === 0;
+  if (elements.exportTrainingJsonButton) {
+    elements.exportTrainingJsonButton.disabled = disableExports;
+  }
+  if (elements.exportYoloButton) {
+    elements.exportYoloButton.disabled = disableExports;
+  }
 }
 
 function getAnnotationFilterText(annotation) {
@@ -2880,6 +3144,7 @@ function updateAnnotationHint(totalCount, filteredCount) {
 
 function renderAnnotationList() {
   syncSelectedAnnotationWithFilters();
+  renderTrainingExportPanel();
   const filteredAnnotations = getFilteredAnnotations();
   elements.annotationCount.textContent =
     filteredAnnotations.length === state.annotations.length
@@ -3186,6 +3451,69 @@ function downloadAnnotatedImage() {
   link.click();
   document.body.removeChild(link);
   setStatus(`已导出标注图：${link.download}`);
+}
+
+function exportTrainingJson() {
+  const payload = buildTrainingExportPayload();
+  if (!payload) {
+    setStatus("请先加载图片并准备可导出的标注。", "error");
+    return;
+  }
+
+  const filename = `${getTrainingExportBaseName()}-training.json`;
+  downloadBlobFile(filename, JSON.stringify(payload, null, 2), "application/json;charset=utf-8");
+  setStatus(`已导出训练 JSON：${filename}`);
+}
+
+function exportYoloAnnotations() {
+  const payload = buildTrainingExportPayload();
+  if (!payload) {
+    setStatus("请先加载图片并准备可导出的标注。", "error");
+    return;
+  }
+
+  const classMap = new Map(
+    payload.classes.map((entry) => [entry.categoryId ? `category:${entry.categoryId}` : `shape:${entry.shapeType}`, entry])
+  );
+  const lines = [];
+  let skippedCount = 0;
+
+  payload.annotations.forEach((annotation) => {
+    if (annotation.shapeType !== "rectangle" || !annotation.bbox?.normalized) {
+      skippedCount += 1;
+      return;
+    }
+
+    const classEntry = classMap.get(annotation.categoryId ? `category:${annotation.categoryId}` : `shape:${annotation.shapeType}`);
+    if (!classEntry) {
+      skippedCount += 1;
+      return;
+    }
+
+    lines.push(
+      [
+        classEntry.classId,
+        annotation.bbox.normalized.xCenter,
+        annotation.bbox.normalized.yCenter,
+        annotation.bbox.normalized.width,
+        annotation.bbox.normalized.height,
+      ].join(" ")
+    );
+  });
+
+  if (!lines.length) {
+    setStatus("当前没有可导出的矩形检测标注。", "error");
+    return;
+  }
+
+  const filename = `${getTrainingExportBaseName()}.txt`;
+  downloadBlobFile(filename, lines.join("\n"), "text/plain;charset=utf-8");
+
+  if (skippedCount > 0) {
+    setStatus(`已导出 YOLO TXT：${filename}，跳过 ${skippedCount} 个非矩形标注。`);
+  } else {
+    setStatus(`已导出 YOLO TXT：${filename}`);
+  }
 }
 
 function roundMetric(value, digits = 4) {
@@ -4365,6 +4693,18 @@ if (elements.downloadButton) {
   });
 }
 
+if (elements.exportTrainingJsonButton) {
+  elements.exportTrainingJsonButton.addEventListener("click", () => {
+    exportTrainingJson();
+  });
+}
+
+if (elements.exportYoloButton) {
+  elements.exportYoloButton.addEventListener("click", () => {
+    exportYoloAnnotations();
+  });
+}
+
 if (elements.saveAnnotationName) {
   elements.saveAnnotationName.addEventListener("click", () => {
     saveAnnotationName();
@@ -4847,6 +5187,7 @@ elements.categoryNameInput.addEventListener("keydown", (event) => {
 });
 
 renderAnnotationList();
+renderTrainingExportPanel();
 updateToolButtons();
 updateDisplayModeButtons();
 updateImagePositionDisplay();
