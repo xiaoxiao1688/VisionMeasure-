@@ -276,14 +276,25 @@
               <span id="training-export-hint">等待标注</span>
             </div>
             <p id="training-export-meta" class="training-export-meta">可导出当前图片的训练标签 JSON 和 YOLO 检测标签。</p>
+            <div class="yolo-config-panel">
+              <div class="yolo-config-row">
+                <label class="field-label" for="yolo-task-type">YOLO 任务</label>
+                <select id="yolo-task-type">
+                  <option value="detect">Detect</option>
+                  <option value="segment">Segment</option>
+                </select>
+              </div>
+              <p id="yolo-config-meta" class="yolo-config-meta">当前先搭建 YOLO 导出框架，检测格式可直接导出，分割格式后续补齐。</p>
+            </div>
             <ul id="training-class-list" class="training-class-list">
               <li class="empty-state">暂无可导出的训练类别。</li>
             </ul>
             <div class="training-export-actions">
               <button id="export-training-json-button" class="ghost compact" type="button">导出训练 JSON</button>
               <button id="export-yolo-button" class="ghost compact" type="button">导出 YOLO TXT</button>
+              <button id="export-yolo-yaml-button" class="ghost compact" type="button">导出 YOLO YAML</button>
             </div>
-            <p class="tool-help">训练 JSON 保留全部导出标注；YOLO TXT 当前按检测格式仅导出矩形框。</p>
+            <p class="tool-help">训练 JSON 保留全部导出标注；YOLO 框架先包含检测 TXT 与 dataset YAML，分割格式后续再补。</p>
           </div>
 
           <p id="status-line" class="status-line">加载图片后，就可以开始打标。</p>

@@ -414,6 +414,32 @@ textarea {
   line-height: 1.45;
 }
 
+.yolo-config-panel {
+  margin-bottom: 12px;
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  background: rgba(25, 50, 60, 0.06);
+  border: 1px solid rgba(25, 50, 60, 0.08);
+}
+
+.yolo-config-row {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  gap: 10px;
+  align-items: center;
+}
+
+.yolo-config-row .field-label {
+  margin: 0;
+}
+
+.yolo-config-meta {
+  margin: 8px 0 0;
+  font-size: 0.76rem;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
 .training-class-list {
   list-style: none;
   margin: 0;
@@ -456,6 +482,10 @@ textarea {
   grid-template-columns: 1fr 1fr;
   gap: 10px;
   margin-top: 12px;
+}
+
+.training-export-actions button:last-child {
+  grid-column: 1 / -1;
 }
 
 .training-export-actions button:disabled {
@@ -1388,6 +1418,14 @@ textarea {
   }
 
   .training-export-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .training-export-actions button:last-child {
+    grid-column: auto;
+  }
+
+  .yolo-config-row {
     grid-template-columns: 1fr;
   }
 

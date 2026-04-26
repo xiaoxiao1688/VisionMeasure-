@@ -60,6 +60,7 @@ const elements = {
   exportTrainingJsonButton: document.querySelector("#export-training-json-button"),
   exportFilename: document.querySelector("#export-filename"),
   exportYoloButton: document.querySelector("#export-yolo-button"),
+  exportYoloYamlButton: document.querySelector("#export-yolo-yaml-button"),
   fileName: document.querySelector("#file-name"),
   historyList: document.querySelector("#history-list"),
   imageLoader: document.querySelector("#image-loader"),
@@ -89,6 +90,8 @@ const elements = {
   trainingClassList: document.querySelector("#training-class-list"),
   trainingExportHint: document.querySelector("#training-export-hint"),
   trainingExportMeta: document.querySelector("#training-export-meta"),
+  yoloConfigMeta: document.querySelector("#yolo-config-meta"),
+  yoloTaskType: document.querySelector("#yolo-task-type"),
   scaleModalOverlay: document.querySelector("#scale-modal-overlay"),
   scaleLengthInput: document.querySelector("#scale-length"),
   scaleUnitSelect: document.querySelector("#scale-unit"),
@@ -168,6 +171,9 @@ const state = {
     query: "",
     shapeType: "all",
     categoryId: "all",
+  },
+  yoloExport: {
+    taskType: "detect",
   },
 };
 
@@ -2995,6 +3001,26 @@ function buildTrainingExportPayload() {
   };
 }
 
+function getCurrentYoloTaskType() {
+  return state.yoloExport.taskType || "detect";
+}
+
+function buildYoloDatasetYaml(payload) {
+  const classEntries = payload?.classes || [];
+  const names = classEntries.map((entry) => entry.name);
+  const yamlLines = [
+    "# GeoDraft YOLO dataset config",
+    `task: ${getCurrentYoloTaskType()}`,
+    "path: ./dataset",
+    "train: images/train",
+    "val: images/val",
+    `nc: ${classEntries.length}`,
+    "names:",
+    ...names.map((name, index) => `  ${index}: "${String(name).replaceAll('"', '\\"')}"`),
+  ];
+  return yamlLines.join("\n");
+}
+
 function downloadBlobFile(filename, content, mimeType) {
   const blob = content instanceof Blob ? content : new Blob([content], { type: mimeType });
   const blobUrl = URL.createObjectURL(blob);
@@ -3024,6 +3050,16 @@ function renderTrainingExportPanel() {
     elements.trainingExportMeta.textContent = `当前图片 ${imageMeta.width} × ${imageMeta.height}，导出时会按现有类别映射生成 class id。`;
   }
 
+  if (elements.yoloTaskType) {
+    elements.yoloTaskType.value = getCurrentYoloTaskType();
+  }
+  if (elements.yoloConfigMeta) {
+    elements.yoloConfigMeta.textContent =
+      getCurrentYoloTaskType() === "detect"
+        ? "当前以 YOLO Detect 为主，支持导出检测 TXT 与 dataset YAML。"
+        : "YOLO Segment 配置入口已预留，当前先导出框架与类别映射，分割标签生成后续补齐。";
+  }
+
   if (!classEntries.length) {
     elements.trainingClassList.innerHTML = '<li class="empty-state">暂无可导出的训练类别。</li>';
   } else {
@@ -3048,6 +3084,9 @@ function renderTrainingExportPanel() {
   }
   if (elements.exportYoloButton) {
     elements.exportYoloButton.disabled = disableExports;
+  }
+  if (elements.exportYoloYamlButton) {
+    elements.exportYoloYamlButton.disabled = disableExports;
   }
 }
 
@@ -3472,6 +3511,11 @@ function exportYoloAnnotations() {
     return;
   }
 
+  if (getCurrentYoloTaskType() !== "detect") {
+    setStatus("YOLO Segment 还在框架阶段，当前先切回 Detect 导出。", "error");
+    return;
+  }
+
   const classMap = new Map(
     payload.classes.map((entry) => [entry.categoryId ? `category:${entry.categoryId}` : `shape:${entry.shapeType}`, entry])
   );
@@ -3514,6 +3558,18 @@ function exportYoloAnnotations() {
   } else {
     setStatus(`已导出 YOLO TXT：${filename}`);
   }
+}
+
+function exportYoloDatasetYaml() {
+  const payload = buildTrainingExportPayload();
+  if (!payload) {
+    setStatus("请先加载图片并准备可导出的标注。", "error");
+    return;
+  }
+
+  const filename = `${getTrainingExportBaseName()}-dataset.yaml`;
+  downloadBlobFile(filename, buildYoloDatasetYaml(payload), "text/yaml;charset=utf-8");
+  setStatus(`已导出 YOLO YAML：${filename}`);
 }
 
 function roundMetric(value, digits = 4) {
@@ -4702,6 +4758,19 @@ if (elements.exportTrainingJsonButton) {
 if (elements.exportYoloButton) {
   elements.exportYoloButton.addEventListener("click", () => {
     exportYoloAnnotations();
+  });
+}
+
+if (elements.exportYoloYamlButton) {
+  elements.exportYoloYamlButton.addEventListener("click", () => {
+    exportYoloDatasetYaml();
+  });
+}
+
+if (elements.yoloTaskType) {
+  elements.yoloTaskType.addEventListener("change", (event) => {
+    state.yoloExport.taskType = event.target.value || "detect";
+    renderTrainingExportPanel();
   });
 }
 
