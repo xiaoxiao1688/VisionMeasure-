@@ -71,6 +71,22 @@ const elements = {
   statusLine: document.querySelector("#status-line"),
   toolButtons: [...document.querySelectorAll("[data-tool]")],
   undoButton: document.querySelector("#undo-button"),
+  scalePanel: document.querySelector("#scale-panel"),
+  scaleInfo: document.querySelector("#scale-info"),
+  scaleStatus: document.querySelector("#scale-status"),
+  scalePixels: document.querySelector("#scale-pixels"),
+  scaleReal: document.querySelector("#scale-real"),
+  scaleRatio: document.querySelector("#scale-ratio"),
+  scaleHint: document.querySelector("#scale-hint"),
+  clearScale: document.querySelector("#clear-scale"),
+  scaleModalOverlay: document.querySelector("#scale-modal-overlay"),
+  scaleLengthInput: document.querySelector("#scale-length"),
+  scaleUnitSelect: document.querySelector("#scale-unit"),
+  scaleUnitCustomRow: document.querySelector("#scale-unit-custom-row"),
+  scaleUnitCustomInput: document.querySelector("#scale-unit-custom"),
+  scalePreviewLength: document.querySelector("#scale-preview-length"),
+  scaleCancel: document.querySelector("#scale-cancel"),
+  scaleConfirm: document.querySelector("#scale-confirm"),
 };
 
 const state = {
@@ -98,10 +114,15 @@ const state = {
   editOriginalAnnotation: null,
   editStartPoint: null,
   displayMode: "fit",
+  scale: createDefaultScaleState(),
+  scaleLinePoints: [],
+  scaleDraft: null,
+  pendingScalePixels: 0,
 };
 
 const ctx = elements.canvas.getContext("2d");
 const canvasContainer = elements.canvas.parentElement;
+const presetScaleUnits = new Set(["mm", "cm", "m", "in", "ft"]);
 
 function getDevicePixelRatio() {
   return Math.max(1, window.devicePixelRatio || 1);
@@ -140,6 +161,10 @@ function getToolInstructions(tool = state.currentTool) {
 
   if (tool === "brush") {
     return "画笔工具已启用，按住拖动即可自由打标。";
+  }
+
+  if (tool === "scale") {
+    return "比例标定工具已启用，在图片上点击绘制两点参考线，建立像素与真实单位的换算关系。";
   }
 
   return "矩形工具已启用，在图片上拖动即可创建矩形标注。";
@@ -297,6 +322,10 @@ function drawScene() {
 
   if (state.currentTool === "brush" && state.brushPoints.length) {
     drawBrushDraft();
+  }
+
+  if (state.currentTool === "scale" && state.scaleLinePoints.length) {
+    drawScaleLine();
   }
 
   ctx.restore();
@@ -527,6 +556,58 @@ function drawBrushDraft() {
   ctx.restore();
 }
 
+function drawScaleLine() {
+  if (state.scaleLinePoints.length === 0) {
+    return;
+  }
+
+  const placement = state.imagePlacement;
+  const points = state.scaleLinePoints.map((point) => ({
+    x: placement.x + point.x * placement.scale,
+    y: placement.y + point.y * placement.scale,
+  }));
+
+  ctx.save();
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = "#9d4edd";
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+
+  if (points.length === 1 && state.scaleDraft) {
+    const previewX = placement.x + state.scaleDraft.previewPoint.x * placement.scale;
+    const previewY = placement.y + state.scaleDraft.previewPoint.y * placement.scale;
+    ctx.lineTo(previewX, previewY);
+    drawVertex(previewX, previewY, false);
+    const length = Math.hypot(
+      state.scaleDraft.previewPoint.x - state.scaleLinePoints[0].x,
+      state.scaleDraft.previewPoint.y - state.scaleLinePoints[0].y
+    );
+    const labelX = (points[0].x + previewX) / 2;
+    const labelY = Math.min(points[0].y, previewY) - 28;
+    drawLabel(labelX - 30, labelY, `${Math.round(length)} px`);
+  } else if (points.length === 2) {
+    ctx.lineTo(points[1].x, points[1].y);
+    drawVertex(points[1].x, points[1].y, false);
+    const length = Math.hypot(
+      points[1].x - points[0].x,
+      points[1].y - points[0].y
+    );
+    const labelX = (points[0].x + points[1].x) / 2;
+    const labelY = Math.min(points[0].y, points[1].y) - 28;
+    drawLabel(labelX - 30, labelY, `标定: ${Math.round(
+      Math.hypot(
+        state.scaleLinePoints[1].x - state.scaleLinePoints[0].x,
+        state.scaleLinePoints[1].y - state.scaleLinePoints[0].y
+      )
+    )} px`);
+  }
+
+  ctx.stroke();
+  drawVertex(points[0].x, points[0].y, false);
+  ctx.restore();
+}
+
 function drawVertex(x, y, selected) {
   ctx.save();
   ctx.beginPath();
@@ -663,56 +744,351 @@ function getPolygonCentroid(points) {
   };
 }
 
+function normalizeScaleUnit(unit) {
+  const normalized = String(unit ?? "").trim();
+  return normalized || "cm";
+}
+
+function isPresetScaleUnit(unit) {
+  return presetScaleUnits.has(normalizeScaleUnit(unit));
+}
+
+function syncScaleUnitInputs(unit = "cm") {
+  if (!elements.scaleUnitSelect || !elements.scaleUnitCustomRow || !elements.scaleUnitCustomInput) {
+    return;
+  }
+
+  if (String(unit ?? "").trim() === "custom") {
+    elements.scaleUnitSelect.value = "custom";
+    elements.scaleUnitCustomRow.classList.remove("hidden");
+    return;
+  }
+
+  const normalized = normalizeScaleUnit(unit);
+  if (isPresetScaleUnit(normalized)) {
+    elements.scaleUnitSelect.value = normalized;
+    elements.scaleUnitCustomInput.value = "";
+    elements.scaleUnitCustomRow.classList.add("hidden");
+    return;
+  }
+
+  elements.scaleUnitSelect.value = "custom";
+  elements.scaleUnitCustomInput.value = normalized;
+  elements.scaleUnitCustomRow.classList.remove("hidden");
+}
+
+function getSelectedScaleUnit() {
+  if (!elements.scaleUnitSelect) {
+    return "cm";
+  }
+
+  if (elements.scaleUnitSelect.value === "custom") {
+    return normalizeScaleUnit(elements.scaleUnitCustomInput?.value);
+  }
+
+  return normalizeScaleUnit(elements.scaleUnitSelect.value);
+}
+
+function createDefaultScaleState(unit = "cm") {
+  return {
+    enabled: false,
+    pixels: 0,
+    realLength: 0,
+    unit: normalizeScaleUnit(unit),
+    pixelPerUnit: 0,
+  };
+}
+
+function hasActiveScale() {
+  return state.scale.enabled && state.scale.pixelPerUnit > 0;
+}
+
 function getAnnotationLabel(annotation) {
   const prefix = annotation.name ? `${annotation.name} · ` : "";
+  const scaleEnabled = hasActiveScale();
+  const unit = getUnitLabel(state.scale.unit);
 
   if (annotation.type === "line") {
-    return `${prefix}折线 ${Math.round(annotation.length)} px`;
+    const pixelLabel = `${Math.round(annotation.length)} px`;
+    if (scaleEnabled) {
+      const realLength = getRealLength(annotation.length);
+      const realLabel = formatRealLength(realLength, unit);
+      return `${prefix}折线 ${pixelLabel} / ${realLabel}`;
+    }
+    return `${prefix}折线 ${pixelLabel}`;
   }
 
   if (annotation.type === "polygon") {
-    return `${prefix}多边形 ${Math.round(annotation.area)} px²`;
+    const pixelLabel = `${Math.round(annotation.area)} px²`;
+    if (scaleEnabled) {
+      const realArea = getRealArea(annotation.area);
+      const realLabel = formatRealArea(realArea, unit);
+      return `${prefix}多边形 ${pixelLabel} / ${realLabel}`;
+    }
+    return `${prefix}多边形 ${pixelLabel}`;
   }
 
   if (annotation.type === "brush") {
-    return `${prefix}画笔 ${Math.round(annotation.length)} px`;
+    const pixelLabel = `${Math.round(annotation.length)} px`;
+    if (scaleEnabled) {
+      const realLength = getRealLength(annotation.length);
+      const realLabel = formatRealLength(realLength, unit);
+      return `${prefix}画笔 ${pixelLabel} / ${realLabel}`;
+    }
+    return `${prefix}画笔 ${pixelLabel}`;
   }
 
-  return `${prefix}${Math.round(annotation.width)} × ${Math.round(annotation.height)} px`;
+  const pixelLabel = `${Math.round(annotation.width)} × ${Math.round(annotation.height)} px`;
+  if (scaleEnabled) {
+    const realWidth = getRealLength(annotation.width);
+    const realHeight = getRealLength(annotation.height);
+    const realLabel = `${formatRealLength(realWidth, unit)} × ${formatRealLength(realHeight, unit)}`;
+    return `${prefix}${pixelLabel} / ${realLabel}`;
+  }
+  return `${prefix}${pixelLabel}`;
 }
 
 function getAnnotationSummary(annotation) {
   const prefix = annotation.name ? `${annotation.name} · ` : "";
+  const scaleEnabled = hasActiveScale();
+  const unit = getUnitLabel(state.scale.unit);
 
   if (annotation.type === "line") {
-    return {
-      title: `${prefix}折线 ${Math.round(annotation.length)} px`,
-      meta: `${annotation.points.length} 个点，总长度 ${Math.round(annotation.length)} px`,
-      selection: `${Math.round(annotation.length)} px`,
-    };
+    const pixelLength = Math.round(annotation.length);
+    let title = `${prefix}折线 ${pixelLength} px`;
+    let meta = `${annotation.points.length} 个点，总长度 ${pixelLength} px`;
+    let selection = `${pixelLength} px`;
+
+    if (scaleEnabled) {
+      const realLength = getRealLength(annotation.length);
+      const realLabel = formatRealLength(realLength, unit);
+      title = `${prefix}折线 ${pixelLength} px / ${realLabel}`;
+      meta = `${annotation.points.length} 个点，总长度 ${pixelLength} px / ${realLabel}`;
+      selection = `${pixelLength} px / ${realLabel}`;
+    }
+
+    return { title, meta, selection };
   }
 
   if (annotation.type === "polygon") {
-    return {
-      title: `${prefix}多边形 ${Math.round(annotation.area)} px²`,
-      meta: `${annotation.points.length} 个顶点，周长 ${Math.round(annotation.perimeter)} px`,
-      selection: `${Math.round(annotation.area)} px²`,
-    };
+    const pixelArea = Math.round(annotation.area);
+    const pixelPerimeter = Math.round(annotation.perimeter);
+    let title = `${prefix}多边形 ${pixelArea} px²`;
+    let meta = `${annotation.points.length} 个顶点，周长 ${pixelPerimeter} px`;
+    let selection = `${pixelArea} px²`;
+
+    if (scaleEnabled) {
+      const realArea = getRealArea(annotation.area);
+      const realPerimeter = getRealLength(annotation.perimeter);
+      const realAreaLabel = formatRealArea(realArea, unit);
+      const realPerimeterLabel = formatRealLength(realPerimeter, unit);
+      title = `${prefix}多边形 ${pixelArea} px² / ${realAreaLabel}`;
+      meta = `${annotation.points.length} 个顶点，周长 ${pixelPerimeter} px / ${realPerimeterLabel}`;
+      selection = `${pixelArea} px² / ${realAreaLabel}`;
+    }
+
+    return { title, meta, selection };
   }
 
   if (annotation.type === "brush") {
-    return {
-      title: `${prefix}画笔 ${Math.round(annotation.length)} px`,
-      meta: `${annotation.points.length} 个点，自由路径长度 ${Math.round(annotation.length)} px`,
-      selection: `${Math.round(annotation.length)} px`,
-    };
+    const pixelLength = Math.round(annotation.length);
+    let title = `${prefix}画笔 ${pixelLength} px`;
+    let meta = `${annotation.points.length} 个点，自由路径长度 ${pixelLength} px`;
+    let selection = `${pixelLength} px`;
+
+    if (scaleEnabled) {
+      const realLength = getRealLength(annotation.length);
+      const realLabel = formatRealLength(realLength, unit);
+      title = `${prefix}画笔 ${pixelLength} px / ${realLabel}`;
+      meta = `${annotation.points.length} 个点，自由路径长度 ${pixelLength} px / ${realLabel}`;
+      selection = `${pixelLength} px / ${realLabel}`;
+    }
+
+    return { title, meta, selection };
   }
 
-  return {
-    title: `${prefix}${Math.round(annotation.width)} × ${Math.round(annotation.height)} px`,
-    meta: `面积 ${Math.round(annotation.area)} px²，起点 (${Math.round(annotation.x)}, ${Math.round(annotation.y)})`,
-    selection: `${Math.round(annotation.width)} × ${Math.round(annotation.height)} px`,
+  const pixelWidth = Math.round(annotation.width);
+  const pixelHeight = Math.round(annotation.height);
+  const pixelArea = Math.round(annotation.area);
+  let title = `${prefix}${pixelWidth} × ${pixelHeight} px`;
+  let meta = `面积 ${pixelArea} px²，起点 (${Math.round(annotation.x)}, ${Math.round(annotation.y)})`;
+  let selection = `${pixelWidth} × ${pixelHeight} px`;
+
+  if (scaleEnabled) {
+    const realWidth = getRealLength(annotation.width);
+    const realHeight = getRealLength(annotation.height);
+    const realArea = getRealArea(annotation.area);
+    const realDimLabel = `${formatRealLength(realWidth, unit)} × ${formatRealLength(realHeight, unit)}`;
+    const realAreaLabel = formatRealArea(realArea, unit);
+    title = `${prefix}${pixelWidth} × ${pixelHeight} px / ${realDimLabel}`;
+    meta = `面积 ${pixelArea} px² / ${realAreaLabel}，起点 (${Math.round(annotation.x)}, ${Math.round(annotation.y)})`;
+    selection = `${pixelWidth} × ${pixelHeight} px / ${realDimLabel}`;
+  }
+
+  return { title, meta, selection };
+}
+
+function getUnitLabel(unit) {
+  return normalizeScaleUnit(unit);
+}
+
+function getRealLength(pixelLength) {
+  if (!state.scale.enabled || state.scale.pixelPerUnit <= 0) {
+    return null;
+  }
+  return pixelLength / state.scale.pixelPerUnit;
+}
+
+function getRealArea(pixelArea) {
+  if (!state.scale.enabled || state.scale.pixelPerUnit <= 0) {
+    return null;
+  }
+  return pixelArea / (state.scale.pixelPerUnit * state.scale.pixelPerUnit);
+}
+
+function formatRealLength(length, unit) {
+  if (length === null || length === undefined) {
+    return "";
+  }
+  const label = getUnitLabel(unit);
+  if (Math.abs(length) < 0.01) {
+    return `0 ${label}`;
+  }
+  if (Math.abs(length) >= 100) {
+    return `${length.toFixed(1)} ${label}`;
+  }
+  return `${length.toFixed(2)} ${label}`;
+}
+
+function formatRealArea(area, unit) {
+  if (area === null || area === undefined) {
+    return "";
+  }
+  const label = getUnitLabel(unit);
+  if (Math.abs(area) < 0.0001) {
+    return `0 ${label}²`;
+  }
+  if (Math.abs(area) >= 100) {
+    return `${area.toFixed(1)} ${label}²`;
+  }
+  return `${area.toFixed(2)} ${label}²`;
+}
+
+function updateScalePanel() {
+  if (!elements.scalePanel) {
+    return;
+  }
+
+  const shouldShow = state.currentTool === "scale" || state.scale.enabled;
+  if (shouldShow) {
+    elements.scalePanel.classList.remove("hidden");
+  } else {
+    elements.scalePanel.classList.add("hidden");
+  }
+
+  if (state.scale.enabled) {
+    elements.scaleInfo.classList.remove("hidden");
+    elements.scaleStatus.textContent = "已标定";
+    elements.scalePixels.textContent = `${Math.round(state.scale.pixels)} px`;
+    elements.scaleReal.textContent = formatRealLength(state.scale.realLength, state.scale.unit);
+    
+    let ratioDisplay;
+    if (state.scale.pixelPerUnit < 0.01) {
+      ratioDisplay = state.scale.pixelPerUnit.toFixed(6);
+    } else if (state.scale.pixelPerUnit < 1) {
+      ratioDisplay = state.scale.pixelPerUnit.toFixed(4);
+    } else if (state.scale.pixelPerUnit >= 1000) {
+      ratioDisplay = state.scale.pixelPerUnit.toFixed(0);
+    } else if (state.scale.pixelPerUnit >= 100) {
+      ratioDisplay = state.scale.pixelPerUnit.toFixed(1);
+    } else {
+      ratioDisplay = state.scale.pixelPerUnit.toFixed(2);
+    }
+    elements.scaleRatio.textContent = `${ratioDisplay} px/${getUnitLabel(state.scale.unit)}`;
+    elements.scaleHint.textContent = "比例标定已生效，所有标注将同时显示像素值和真实单位。";
+  } else {
+    elements.scaleInfo.classList.add("hidden");
+    elements.scaleStatus.textContent = "未标定";
+    elements.scalePixels.textContent = "0 px";
+    const unitLabel = getUnitLabel(state.scale.unit);
+    elements.scaleReal.textContent = `0 ${unitLabel}`;
+    elements.scaleRatio.textContent = `0 px/${unitLabel}`;
+    elements.scaleHint.textContent = "在图片上绘制一条已知长度的参考线，建立像素与真实单位的换算关系。";
+  }
+}
+
+function resetScaleState() {
+  state.scaleLinePoints = [];
+  state.scaleDraft = null;
+  state.pendingScalePixels = 0;
+}
+
+function clearScale() {
+  state.scale = createDefaultScaleState(state.scale.unit);
+  resetScaleState();
+  updateScalePanel();
+  renderAnnotationList();
+  drawScene();
+  setStatus("已清除比例标定，所有标注将只显示像素值。");
+}
+
+function showScaleModal(pixelLength) {
+  if (!elements.scaleModalOverlay || !elements.scaleLengthInput || !elements.scalePreviewLength) {
+    return;
+  }
+
+  state.pendingScalePixels = pixelLength;
+  elements.scaleLengthInput.value = "";
+  syncScaleUnitInputs(state.scale.enabled ? state.scale.unit : "cm");
+  elements.scalePreviewLength.textContent = `${Math.round(pixelLength)} px`;
+  elements.scaleModalOverlay.classList.remove("hidden");
+  elements.scaleLengthInput.focus();
+}
+
+function hideScaleModal() {
+  if (elements.scaleModalOverlay) {
+    elements.scaleModalOverlay.classList.add("hidden");
+  }
+  resetScaleState();
+  drawScene();
+}
+
+function confirmScale() {
+  if (!elements.scaleLengthInput || !elements.scaleUnitSelect) {
+    return;
+  }
+
+  const length = parseFloat(elements.scaleLengthInput.value);
+  const unit = getSelectedScaleUnit();
+  const pendingPixels = state.pendingScalePixels;
+
+  if (isNaN(length) || length <= 0) {
+    setStatus("请输入有效的真实长度值。", "error");
+    return;
+  }
+
+  if (elements.scaleUnitSelect.value === "custom" && !(elements.scaleUnitCustomInput?.value || "").trim()) {
+    setStatus("请输入自定义单位。", "error");
+    elements.scaleUnitCustomInput?.focus();
+    return;
+  }
+
+  state.scale = {
+    enabled: true,
+    pixels: pendingPixels,
+    realLength: length,
+    unit: unit,
+    pixelPerUnit: pendingPixels / length,
   };
+
+  if (elements.scaleModalOverlay) {
+    elements.scaleModalOverlay.classList.add("hidden");
+  }
+  resetScaleState();
+  updateScalePanel();
+  renderAnnotationList();
+  drawScene();
+  setStatus(`比例标定已设置：${Math.round(pendingPixels)} px = ${formatRealLength(length, unit)}`);
 }
 
 function updateToolButtons() {
@@ -957,7 +1333,9 @@ function refreshOverlay() {
 function setCurrentTool(tool) {
   state.currentTool = tool;
   resetDraftState();
+  resetScaleState();
   updateToolButtons();
+  updateScalePanel();
   refreshOverlay();
   setStatus(getToolInstructions(tool));
   drawScene();
@@ -1041,11 +1419,14 @@ function resetSessionStateForNewImage() {
   state.imageOffset = { x: 0, y: 0 };
   state.displayMode = "fit";
   state.originalImageDataUrl = null;
+  state.scale = createDefaultScaleState();
   resetDraftState();
+  resetScaleState();
   renderAnnotationList();
   updateAnnotationNameEditor();
   updateDisplayModeButtons();
   updateImagePositionDisplay();
+  updateScalePanel();
 }
 
 function loadImageFromSource(source, fileName, options = {}) {
@@ -1133,20 +1514,36 @@ function loadImage(file) {
   });
 }
 
+function drawLabelToContext(targetContext, x, y, label, canvasWidth, canvasHeight) {
+  const safeX = Math.max(12, Math.min(x, canvasWidth - 220));
+  const safeY = Math.max(12, Math.min(y, canvasHeight - 36));
+  targetContext.font = '600 13px "Aptos", "Segoe UI Variable Text", sans-serif';
+  const textWidth = targetContext.measureText(label).width;
+  targetContext.fillStyle = "rgba(10, 16, 19, 0.86)";
+  targetContext.fillRect(safeX, safeY, textWidth + 18, 24);
+  targetContext.fillStyle = "#fff3e8";
+  targetContext.fillText(label, safeX + 9, safeY + 17);
+}
+
 function drawToCanvas(targetContext) {
   if (!state.image) {
     return;
   }
 
   targetContext.drawImage(state.image, 0, 0);
+  const canvasWidth = state.image.width;
+  const canvasHeight = state.image.height;
 
   state.annotations.forEach((annotation) => {
+    const label = getAnnotationLabel(annotation);
+
     if (annotation.type === "rectangle") {
       targetContext.lineWidth = 3;
       targetContext.strokeStyle = "#ff8f62";
       targetContext.fillStyle = "rgba(255, 143, 98, 0.18)";
       targetContext.strokeRect(annotation.x, annotation.y, annotation.width, annotation.height);
       targetContext.fillRect(annotation.x, annotation.y, annotation.width, annotation.height);
+      drawLabelToContext(targetContext, annotation.x, Math.max(0, annotation.y - 28), label, canvasWidth, canvasHeight);
       return;
     }
 
@@ -1169,12 +1566,16 @@ function drawToCanvas(targetContext) {
       targetContext.fillStyle = "rgba(138, 227, 95, 0.22)";
       targetContext.fill();
       targetContext.stroke();
+      const centroid = getPolygonCentroid(annotation.points);
+      drawLabelToContext(targetContext, centroid.x - 36, Math.max(0, centroid.y - 18), label, canvasWidth, canvasHeight);
       return;
     }
 
     targetContext.lineWidth = annotation.type === "brush" ? 3 : 3;
     targetContext.strokeStyle = annotation.type === "brush" ? "#ff6b9d" : "#55d5ff";
     targetContext.stroke();
+    const centroid = getPolygonCentroid(annotation.points);
+    drawLabelToContext(targetContext, centroid.x - 36, Math.max(0, centroid.y - 18), label, canvasWidth, canvasHeight);
   });
 }
 
@@ -1217,6 +1618,43 @@ function downloadAnnotatedImage() {
   setStatus(`已导出标注图：${link.download}`);
 }
 
+function roundMetric(value, digits = 4) {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return undefined;
+  }
+  return Number(value.toFixed(digits));
+}
+
+function serializeRealMetrics(annotation) {
+  if (!hasActiveScale()) {
+    return undefined;
+  }
+
+  const realMetrics = {
+    unit: getUnitLabel(state.scale.unit),
+  };
+
+  if (annotation.type === "rectangle") {
+    realMetrics.width = roundMetric(getRealLength(annotation.width));
+    realMetrics.height = roundMetric(getRealLength(annotation.height));
+    realMetrics.area = roundMetric(getRealArea(annotation.area));
+    return realMetrics;
+  }
+
+  if (annotation.type === "line" || annotation.type === "brush") {
+    realMetrics.length = roundMetric(getRealLength(annotation.length));
+    return realMetrics;
+  }
+
+  if (annotation.type === "polygon") {
+    realMetrics.area = roundMetric(getRealArea(annotation.area));
+    realMetrics.perimeter = roundMetric(getRealLength(annotation.perimeter));
+    return realMetrics;
+  }
+
+  return undefined;
+}
+
 function serializeAnnotations() {
   return state.annotations.map((annotation) => ({
     id: annotation.id,
@@ -1235,6 +1673,7 @@ function serializeAnnotations() {
           y: Number(point.y.toFixed(2)),
         }))
       : undefined,
+    realMetrics: serializeRealMetrics(annotation),
   }));
 }
 
@@ -1288,6 +1727,15 @@ async function saveAnnotations() {
       width: state.image.width,
       height: state.image.height,
     },
+    scale: state.scale.enabled
+      ? {
+          enabled: state.scale.enabled,
+          pixels: Number(state.scale.pixels.toFixed(2)),
+          realLength: Number(state.scale.realLength.toFixed(4)),
+          unit: state.scale.unit,
+          pixelPerUnit: Number(state.scale.pixelPerUnit.toFixed(8)),
+        }
+      : undefined,
     annotations: serializeAnnotations(),
     originalImage,
     annotatedImage,
@@ -1399,10 +1847,25 @@ async function loadSession(filePrefix) {
     state.annotations = Array.isArray(body.annotations) ? body.annotations : [];
     state.selectedId = null;
     state.undoStack = [];
+
+    if (body.scale && body.scale.enabled) {
+      state.scale = {
+        enabled: Boolean(body.scale.enabled),
+        pixels: Number(body.scale.pixels) || 0,
+        realLength: Number(body.scale.realLength) || 0,
+        unit: normalizeScaleUnit(body.scale.unit),
+        pixelPerUnit: Number(body.scale.pixelPerUnit) || 0,
+      };
+    } else {
+      state.scale = createDefaultScaleState();
+    }
+
     resetDraftState();
+    resetScaleState();
     renderAnnotationList();
     updateAnnotationNameEditor();
     updateDisplayModeButtons();
+    updateScalePanel();
 
     const imageMeta = body.imageMeta || {};
     const preferredImage = state.originalImageDataUrl || body.annotatedImage;
@@ -1412,9 +1875,12 @@ async function loadSession(filePrefix) {
         preserveAnnotations: true,
         imageFile: null,
         afterLoad: () => {
-          const message = body.originalImage
+          let message = body.originalImage
             ? `已加载历史项目：${elements.projectName.value}`
             : `已加载历史项目：${elements.projectName.value}。当前显示的是已标注预览图。`;
+          if (state.scale.enabled) {
+            message += ` 比例标定已恢复：${Math.round(state.scale.pixels)} px = ${formatRealLength(state.scale.realLength, state.scale.unit)}`;
+          }
           setStatus(message);
         },
       });
@@ -1722,6 +2188,31 @@ elements.canvas.addEventListener("pointerdown", (event) => {
     return;
   }
 
+  if (state.currentTool === "scale") {
+    if (state.scaleLinePoints.length === 0) {
+      state.scaleLinePoints.push(point);
+      state.scaleDraft = null;
+      drawScene();
+      setStatus("已添加标定起点，点击添加终点完成参考线绘制。");
+    } else if (state.scaleLinePoints.length === 1) {
+      state.scaleLinePoints.push(point);
+      state.scaleDraft = null;
+      drawScene();
+      const length = Math.hypot(
+        state.scaleLinePoints[1].x - state.scaleLinePoints[0].x,
+        state.scaleLinePoints[1].y - state.scaleLinePoints[0].y
+      );
+      if (length < 4) {
+        setStatus("标定线太短，请重新绘制。", "error");
+        resetScaleState();
+        drawScene();
+        return;
+      }
+      showScaleModal(length);
+    }
+    return;
+  }
+
   if (state.currentTool === "brush") {
     state.drawing = true;
     state.brushPoints = [point];
@@ -1805,6 +2296,13 @@ elements.canvas.addEventListener("pointermove", (event) => {
   if (state.currentTool === "line") {
     state.draftAnnotation =
       state.linePoints.length && point ? { type: "line-preview", previewPoint: point } : null;
+    drawScene();
+    return;
+  }
+
+  if (state.currentTool === "scale") {
+    state.scaleDraft =
+      state.scaleLinePoints.length === 1 && point ? { type: "scale-preview", previewPoint: point } : null;
     drawScene();
     return;
   }
@@ -1962,6 +2460,24 @@ document.addEventListener("keydown", (event) => {
       setStatus(`已撤销一个折线点，剩余 ${state.linePoints.length} 个。`);
     }
   }
+
+  if (state.currentTool === "scale") {
+    if (event.key === "Escape") {
+      resetScaleState();
+      drawScene();
+      setStatus("已取消当前比例标定绘制。");
+    } else if (event.key === "Backspace" && state.scaleLinePoints.length) {
+      event.preventDefault();
+      state.scaleLinePoints.pop();
+      state.scaleDraft = null;
+      drawScene();
+      if (state.scaleLinePoints.length === 0) {
+        setStatus("已撤销标定起点，请重新点击添加起点。");
+      } else {
+        setStatus(`已撤销标定点，剩余 ${state.scaleLinePoints.length} 个。点击添加终点完成参考线绘制。`);
+      }
+    }
+  }
 });
 
 elements.annotationList.addEventListener("click", (event) => {
@@ -2054,12 +2570,72 @@ if (elements.resetImagePosition) {
   });
 }
 
+if (elements.clearScale) {
+  elements.clearScale.addEventListener("click", () => {
+    clearScale();
+  });
+}
+
+if (elements.scaleCancel) {
+  elements.scaleCancel.addEventListener("click", () => {
+    hideScaleModal();
+  });
+}
+
+if (elements.scaleConfirm) {
+  elements.scaleConfirm.addEventListener("click", () => {
+    confirmScale();
+  });
+}
+
+if (elements.scaleUnitSelect) {
+  elements.scaleUnitSelect.addEventListener("change", () => {
+    syncScaleUnitInputs(elements.scaleUnitSelect.value);
+    if (elements.scaleUnitSelect.value === "custom") {
+      elements.scaleUnitCustomInput?.focus();
+    }
+  });
+}
+
+if (elements.scaleLengthInput) {
+  elements.scaleLengthInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      confirmScale();
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      hideScaleModal();
+    }
+  });
+}
+
+if (elements.scaleUnitCustomInput) {
+  elements.scaleUnitCustomInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      confirmScale();
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      hideScaleModal();
+    }
+  });
+}
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && elements.scaleModalOverlay && !elements.scaleModalOverlay.classList.contains("hidden")) {
+    event.preventDefault();
+    hideScaleModal();
+  }
+});
+
 window.addEventListener("resize", syncCanvasSize);
 
 renderAnnotationList();
 updateToolButtons();
 updateDisplayModeButtons();
 updateImagePositionDisplay();
+syncScaleUnitInputs(state.scale.unit);
+updateScalePanel();
 refreshOverlay();
 syncCanvasSize();
 loadHistoryList();

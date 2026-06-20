@@ -39,10 +39,41 @@
               <button data-tool="line" class="tool-button" type="button">折线</button>
               <button data-tool="polygon" class="tool-button" type="button">多边形</button>
               <button data-tool="brush" class="tool-button" type="button">画笔</button>
+              <button data-tool="scale" class="tool-button" type="button">比例标定</button>
             </div>
             <p class="tool-help">
-              矩形适合框选，折线适合连续路径，多边形适合区域边界，画笔适合自由涂绘。
+              矩形适合框选，折线适合连续路径，多边形适合区域边界，画笔适合自由涂绘。比例标定可建立像素与真实单位的换算关系。
             </p>
+          </div>
+
+          <div id="scale-panel" class="scale-panel hidden">
+            <div class="panel-heading">
+              <h3>比例标定</h3>
+              <button id="clear-scale" class="refresh-button" type="button" title="清除标定">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M18 6 6 18M6 6l12 12"></path>
+                </svg>
+              </button>
+            </div>
+            <div id="scale-info" class="scale-info hidden">
+              <p class="scale-meta">
+                <span class="field-label">标定状态</span>
+                <span id="scale-status">未标定</span>
+              </p>
+              <p class="scale-meta">
+                <span class="field-label">像素长度</span>
+                <span id="scale-pixels">0 px</span>
+              </p>
+              <p class="scale-meta">
+                <span class="field-label">真实长度</span>
+                <span id="scale-real">0 cm</span>
+              </p>
+              <p class="scale-meta">
+                <span class="field-label">换算比例</span>
+                <span id="scale-ratio">0 px/cm</span>
+              </p>
+            </div>
+            <p id="scale-hint" class="tool-help">在图片上绘制一条已知长度的参考线，建立像素与真实单位的换算关系。</p>
           </div>
 
           <label class="field-label" for="export-filename">导出文件名</label>
@@ -213,6 +244,40 @@
           </div>
         </section>
       </main>
+    </div>
+
+    <div id="scale-modal-overlay" class="modal-overlay hidden">
+      <div class="modal-content">
+        <h3>设置比例标定</h3>
+        <p class="tool-help">请输入参考线的真实长度和单位。</p>
+        <div class="scale-input-row">
+          <label class="field-label" for="scale-length">真实长度</label>
+          <input id="scale-length" type="number" min="0.01" step="0.01" placeholder="输入数值" />
+        </div>
+        <div class="scale-input-row">
+          <label class="field-label" for="scale-unit">单位</label>
+          <select id="scale-unit">
+            <option value="mm">毫米 (mm)</option>
+            <option value="cm" selected>厘米 (cm)</option>
+            <option value="m">米 (m)</option>
+            <option value="in">英寸 (in)</option>
+            <option value="ft">英尺 (ft)</option>
+            <option value="custom">Custom</option>
+          </select>
+        </div>
+        <div id="scale-unit-custom-row" class="scale-input-row hidden">
+          <label class="field-label" for="scale-unit-custom">Custom Unit</label>
+          <input id="scale-unit-custom" type="text" maxlength="24" placeholder="e.g. um, nm, px-per-grid" />
+        </div>
+        <div class="scale-input-row">
+          <span class="field-label">当前像素长度</span>
+          <span id="scale-preview-length" class="scale-preview">0 px</span>
+        </div>
+        <div class="modal-actions">
+          <button id="scale-cancel" type="button" class="ghost">取消</button>
+          <button id="scale-confirm" type="button" class="primary">确认</button>
+        </div>
+      </div>
     </div>
 
     <script src="{{ url_for('static', filename='js/app.js') }}" defer></script>
